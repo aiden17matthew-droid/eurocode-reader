@@ -1,0 +1,39 @@
+# --- Copyrighted standards: NEVER commit ---------------------------------
+# Eurocode PDFs are licensed to the individual engineer. The app requires the
+# user to supply their own copy (see CLAUDE.md, rule 5).
+*.pdf
+
+# --- Local index / user data ---------------------------------------------
+# Rebuildable from the user's own PDFs, and may reveal local file paths.
+data/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# --- Python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# --- Virtual environments -------------------------------------------------
+.venv/
+venv/
+env/
+
+# --- Local model cache (large; downloaded per machine) --------------------
+models/
+.cache/
+
+# --- Editors / OS ---------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
