@@ -28,8 +28,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from .branding import APP_NAME, DISCLAIMER, NOT_CALCULATED
+
 SCHEMA_VERSION = 1
 
+# The slug inside saved files: it names the format, not the product, so it
+# stays put through a rename - every library already on disk uses it.
 FILE_KIND = "eurocode-reader-equation-library"
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -39,16 +43,6 @@ MAX_NAME = 120
 MAX_LATEX = 1200
 MAX_NOTE = 600
 
-DISCLAIMER = (
-    "For navigation only. Verify all clauses in the official Eurocode."
-)
-
-# Stated on the editor and stored in the file, so a shared library carries the
-# same warning as everything else this app writes.
-NOT_CALCULATED = (
-    "Equations are visual references only. This app never evaluates, "
-    "substitutes into, or solves them."
-)
 
 
 class EquationError(ValueError):
@@ -219,6 +213,8 @@ class EquationLibrary:
             "kind": FILE_KIND,
             "schema_version": SCHEMA_VERSION,
             "disclaimer": DISCLAIMER,
+            # Written into the file so a shared library carries the same
+            # warning as everything else this app saves.
             "note": NOT_CALCULATED,
             "equations": [e.to_dict() for e in self.sorted()],
         }
@@ -231,7 +227,7 @@ class EquationLibrary:
         stated = data.get("kind")
         if stated is not None and stated != FILE_KIND:
             raise EquationError(
-                f"Not a Eurocode Reader equation library (kind={stated!r})"
+                f"Not a {APP_NAME} equation library (kind={stated!r})"
             )
 
         version = data.get("schema_version", SCHEMA_VERSION)
@@ -323,7 +319,7 @@ def _cli() -> int:
         pass
 
     parser = argparse.ArgumentParser(
-        description=f"Eurocode Reader equation library. {NOT_CALCULATED}"
+        description=f"{APP_NAME} equation library. {NOT_CALCULATED}"
     )
     parser.add_argument("--library", type=Path, default=DEFAULT_LIBRARY_PATH)
     sub = parser.add_subparsers(dest="command", required=True)

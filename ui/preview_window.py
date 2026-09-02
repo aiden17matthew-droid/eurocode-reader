@@ -17,12 +17,14 @@ from typing import Optional
 import customtkinter as ctk
 from PIL import Image, ImageTk
 
+from backend.branding import DISCLAIMER
+
 try:
     import pymupdf as fitz
 except ImportError:  # pragma: no cover - older PyMuPDF releases
     import fitz
 
-DISCLAIMER = "For navigation only. Verify all clauses in the official Eurocode."
+
 
 MIN_ZOOM = 0.5
 MAX_ZOOM = 4.0

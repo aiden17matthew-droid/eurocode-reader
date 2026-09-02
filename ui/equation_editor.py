@@ -105,9 +105,14 @@ class EquationEditorDialog(ctk.CTkToplevel):
         library: EquationLibrary,
         initial: Optional[Equation] = None,
         on_library_changed: Optional[Callable[[], None]] = None,
+        standalone: bool = False,
     ) -> None:
         super().__init__(master)
 
+        # Standalone means "opened from the menu to manage the library",
+        # rather than "opened from a node to pick an equation for it". The
+        # dialog needs no document, no flowchart and no node either way.
+        self.standalone = standalone
         self.library = library
         self.result: Optional[Equation] = None
         self.on_library_changed = on_library_changed or (lambda: None)
@@ -117,7 +122,8 @@ class EquationEditorDialog(ctk.CTkToplevel):
         self._blank = blank_ctk_image()
         self._last_error: Optional[str] = None
 
-        self.title("Equation editor")
+        self.title("Global equation library" if standalone
+                   else "Equation editor")
         self.geometry("820x760")
         self.minsize(700, 660)
 
@@ -265,7 +271,8 @@ class EquationEditorDialog(ctk.CTkToplevel):
             library_frame, anchor="w", justify="left", text_color=MUTED,
             font=ctk.CTkFont(size=11), wraplength=660,
             text="Saved equations are shared by every workflow, so an "
-                 "expression only has to be typed once.",
+                 "expression only has to be typed once. Build them here "
+                 "before you load a single PDF if you like.",
         ).grid(row=1, column=0, columnspan=3, sticky="ew", padx=12, pady=(0, 8))
 
         self.library_menu = ctk.CTkOptionMenu(
@@ -304,17 +311,24 @@ class EquationEditorDialog(ctk.CTkToplevel):
             command=self._on_save,
         ).grid(row=2, column=0, sticky="w")
 
-        ctk.CTkButton(
+        self.cancel_button = ctk.CTkButton(
             footer, text="Cancel", width=90, height=36,
             fg_color="transparent", border_width=1, text_color=MUTED,
             command=self._on_cancel,
-        ).grid(row=2, column=2, sticky="e", padx=(0, 8))
+        )
+        self.cancel_button.grid(row=2, column=2, sticky="e", padx=(0, 8))
 
         self.use_button = ctk.CTkButton(
             footer, text="Use this equation", width=150, height=36,
             font=ctk.CTkFont(size=13, weight="bold"), command=self._on_use,
         )
         self.use_button.grid(row=2, column=3, sticky="e")
+
+        if self.standalone:
+            # Nothing is waiting for an equation, so there is nothing to
+            # "use" - the Save button above is the whole point of being here.
+            self.cancel_button.grid_remove()
+            self.use_button.configure(text="Done", command=self._on_cancel)
 
     def _fill_palette(self, parent, buttons) -> None:
         columns = 10
@@ -560,3 +574,19 @@ def edit_equation(
                                   on_library_changed=on_library_changed)
     master.wait_window(dialog)
     return dialog.result
+
+
+def manage_equations(
+    master,
+    library: EquationLibrary,
+    on_library_changed: Optional[Callable[[], None]] = None,
+) -> None:
+    """Open the library on its own, to build equations up front.
+
+    Needs no document, no flowchart and no selected node - an engineer can
+    type out their standard expressions before they have loaded anything.
+    """
+    dialog = EquationEditorDialog(master, library=library,
+                                  on_library_changed=on_library_changed,
+                                  standalone=True)
+    master.wait_window(dialog)

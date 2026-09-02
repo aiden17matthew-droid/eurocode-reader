@@ -1,4 +1,4 @@
-"""Eurocode Reader - entry point.
+"""EuroCode Compass - entry point.
 
 Run with:
 

@@ -35,10 +35,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from .branding import APP_NAME, DISCLAIMER
 from .flowchart import Flowchart, FlowchartError, _clean
 
 SCHEMA_VERSION = 1
 
+# Slugs inside saved files: they name the format, not the product, so they
+# stay put through a rename - every workspace already on disk uses them.
 FILE_KIND = "eurocode-reader-workspace"
 SESSION_KIND = "eurocode-reader-session"
 
@@ -48,9 +51,6 @@ DEFAULT_SESSION_PATH = PROJECT_ROOT / "data" / "session.json"
 WORKSPACE_SUFFIX = ".json"
 MAX_NAME = 200
 
-DISCLAIMER = (
-    "For navigation only. Verify all clauses in the official Eurocode."
-)
 
 
 class WorkspaceError(ValueError):
@@ -203,7 +203,7 @@ class Workspace:
         stated = data.get("kind")
         if stated is not None and stated not in allowed_kinds:
             raise WorkspaceError(
-                f"Not a Eurocode Reader workspace (kind={stated!r})"
+                f"Not a {APP_NAME} workspace (kind={stated!r})"
             )
 
         version = data.get("schema_version", SCHEMA_VERSION)
@@ -466,7 +466,7 @@ def _cli() -> int:
         pass
 
     parser = argparse.ArgumentParser(
-        description=f"Eurocode Reader workspace files. {DISCLAIMER}"
+        description=f"{APP_NAME} workspace files. {DISCLAIMER}"
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

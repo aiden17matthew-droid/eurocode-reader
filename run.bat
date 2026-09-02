@@ -1,5 +1,5 @@
 @echo off
-REM Eurocode Reader - one-click launcher (Windows)
+REM EuroCode Compass - one-click launcher (Windows)
 REM Uses the local .venv if present, otherwise the system Python.
 
 cd /d "%~dp0"

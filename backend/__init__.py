@@ -1,4 +1,4 @@
-"""Eurocode Reader - local, offline backend package.
+"""EuroCode Compass - local, offline backend package.
 
 For navigation only. Verify all clauses in the official Eurocode.
 """
@@ -18,6 +18,7 @@ from .workspace import (
     resolve_selected_id,
     save_session,
 )
+from .branding import APP_NAME, DISCLAIMER, NOT_AFFILIATED
 from .equations import (
     Equation,
     EquationError,
@@ -49,6 +50,8 @@ __all__ = [
     "FlowNode",
     "NodeEquation",
     "NodeRef",
+    "APP_NAME",
+    "NOT_AFFILIATED",
     "Equation",
     "EquationError",
     "EquationLibrary",

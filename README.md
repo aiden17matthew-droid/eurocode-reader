@@ -1,4 +1,4 @@
-# Eurocode Reader
+# EuroCode Compass
 
 A 100% offline desktop app that points structural engineers to the right
 **page, clause and table** in Eurocode PDFs they already own.

@@ -1,4 +1,4 @@
-"""One-time model download for Eurocode Reader.
+"""One-time model download for EuroCode Compass.
 
 Run this ONCE while connected to the internet:
 

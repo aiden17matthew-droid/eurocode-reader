@@ -30,13 +30,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from .branding import APP_NAME, DISCLAIMER
+
 SCHEMA_VERSION = 1
 
+# The slug inside saved files. It names the format, not the product, so
+# it stays put through a rename - every flowchart already on disk uses it.
 FILE_KIND = "eurocode-reader-flowchart"
 
-DISCLAIMER = (
-    "For navigation only. Verify all clauses in the official Eurocode."
-)
 
 # start/end are the terminators; process is a step; decision is an if/else
 # fork whose branches the engineer labels and follows themselves.
@@ -452,7 +453,7 @@ class Flowchart:
         stated_kind = data.get("kind")
         if stated_kind is not None and stated_kind != FILE_KIND:
             raise FlowchartError(
-                f"Not a Eurocode Reader flowchart (kind={stated_kind!r})"
+                f"Not a {APP_NAME} flowchart (kind={stated_kind!r})"
             )
 
         version = data.get("schema_version", SCHEMA_VERSION)
@@ -545,7 +546,7 @@ def _cli() -> int:
         pass
 
     parser = argparse.ArgumentParser(
-        description=f"Eurocode Reader flowchart files. {DISCLAIMER}"
+        description=f"{APP_NAME} flowchart files. {DISCLAIMER}"
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

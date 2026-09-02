@@ -84,3 +84,23 @@ Allow engineers to easily construct, render, and save complex Eurocode structura
    - When a node has an equation, it should render beautifully on the flowchart canvas.
 4. **Strict Liability Constraint:**
    - The equations are purely visual references for the engineer. The app MUST NEVER calculate, evaluate, or solve these formulas.
+
+   ## Phase 6: Global Menu Bar & App Renaming
+
+### Purpose
+Transform the application into a standard desktop environment with a persistent top menu bar, global access to tools, and official branding.
+
+### Core Requirements
+1. **App Branding:**
+   - Rename the application window, main UI elements, and references to "EuroCode Compass".
+2. **Standard Menu Bar:**
+   - Implement a traditional desktop menu bar at the top of the window (using `tk.Menu` or a CustomTkinter equivalent).
+   - **File:** New Workspace, Open Workspace, Save Workspace, Save As, Exit.
+   - **View:** Search Tab, Flowchart Tab.
+   - **Equations:** "Manage Global Equations..." (This must open the Equation Library dialog independently, even if no document or node is active, allowing users to pre-build their math library).
+   - **Help:** "About" (Include a small disclaimer: "EuroCode Compass is a local workflow tool. Not affiliated with CEN or BSI.").
+
+## Phase 7: UI Polish, Scrolling Ergonomics & User Customization
+*(To be implemented after Phase 6)*
+- Fix scroll-wheel event bindings in the search results so scrolling is smooth and doesn't "drag" elements.
+- Add a Settings dialog (accessible via the Menu bar) for Light/Dark mode toggling, Font Size adjustments, and UI scaling.

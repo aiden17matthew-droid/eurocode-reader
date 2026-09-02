@@ -20,13 +20,11 @@ from typing import Callable, List, Optional
 
 import numpy as np
 
+from .branding import APP_NAME, DISCLAIMER
 from .database import DEFAULT_DB_PATH, VectorStore
 from .embedder import DEFAULT_MODEL_NAME, Embedder
 from .pdf_loader import PageChunk, chunk_pdf, file_hash, load_pdf_metadata
 
-DISCLAIMER = (
-    "For navigation only. Verify all clauses in the official Eurocode."
-)
 
 EMBED_BATCH = 64          # chunks embedded + written per transaction
 
@@ -241,7 +239,7 @@ def _cli() -> int:
         pass
 
     parser = argparse.ArgumentParser(
-        description=f"Eurocode Reader backend. {DISCLAIMER}"
+        description=f"{APP_NAME} backend. {DISCLAIMER}"
     )
     parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH,
                         help="SQLite index file")

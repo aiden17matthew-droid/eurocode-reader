@@ -16,6 +16,7 @@ from typing import Callable, Dict, List, Optional
 
 import customtkinter as ctk
 
+from backend.branding import APP_NAME
 from backend.indexer import (
     DISCLAIMER,
     MIN_RELEVANCE,
@@ -198,7 +199,7 @@ class SearchView(ctk.CTkFrame):
         self._set_busy(False)
         self._hide_progress()
         self.set_status(f"Error: {exc}")
-        messagebox.showerror("Eurocode Reader", str(exc), parent=self)
+        messagebox.showerror(APP_NAME, str(exc), parent=self)
 
     # ------------------------------------------------------------------
     # Loading / indexing
@@ -383,7 +384,7 @@ class SearchView(ctk.CTkFrame):
         doc_id = self._selected_document_id()
         if doc_id is None:
             messagebox.showinfo(
-                "Eurocode Reader",
+                APP_NAME,
                 "Select a specific document to remove it from the index.",
                 parent=self,
             )
@@ -414,7 +415,7 @@ class SearchView(ctk.CTkFrame):
             return
         if not self.indexer.list_documents():
             messagebox.showinfo(
-                "Eurocode Reader",
+                APP_NAME,
                 "Load a Eurocode PDF first - the index is empty.",
                 parent=self,
             )
