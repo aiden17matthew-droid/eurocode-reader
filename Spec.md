@@ -104,3 +104,22 @@ Transform the application into a standard desktop environment with a persistent 
 *(To be implemented after Phase 6)*
 - Fix scroll-wheel event bindings in the search results so scrolling is smooth and doesn't "drag" elements.
 - Add a Settings dialog (accessible via the Menu bar) for Light/Dark mode toggling, Font Size adjustments, and UI scaling.
+
+## Phase 7: UI Polish, Scrolling Ergonomics & User Guide
+
+### Purpose
+Refine the user experience by fixing navigation bugs, providing accessibility settings, and adding built-in user documentation.
+
+### Core Requirements
+1. **Scrolling Ergonomics:**
+   - Fix the scroll-wheel event bindings in the search results and canvas so scrolling is smooth. It should not accidentally "drag" UI elements when the user is just trying to scroll up and down.
+2. **User Customization (Settings):**
+   - Add a "Settings" modal (accessible via the Menu bar > View or File).
+   - Allow the user to toggle between Light Mode, Dark Mode, and System Default.
+   - Allow the user to adjust the UI Scaling / Font Size (e.g., 100%, 125%, 150%).
+3. **Built-in User Guide:**
+   - Under the "Help" menu, add a "How to Use EuroCode Compass" button.
+   - This should open a clean, readable dialog window that explains:
+     - **Search:** How semantic search works, how to use the relevance threshold, and why it doesn't do automated calculations.
+     - **Flowchart:** How to build logic nodes, connect them, and transfer text snippets directly from the search results.
+     - **Equations:** How to use the global equation library.

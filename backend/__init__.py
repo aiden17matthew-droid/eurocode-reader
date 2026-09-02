@@ -7,6 +7,7 @@ from .pdf_loader import PageChunk, chunk_pdf, load_pdf_metadata
 from .embedder import Embedder, DEFAULT_MODEL_NAME
 from .database import VectorStore, DEFAULT_DB_PATH
 from .indexer import Indexer, SearchHit
+from .settings import Settings
 from .workspace import (
     RestorePlan,
     Workspace,
@@ -51,6 +52,7 @@ __all__ = [
     "NodeEquation",
     "NodeRef",
     "APP_NAME",
+    "Settings",
     "NOT_AFFILIATED",
     "Equation",
     "EquationError",

@@ -10,6 +10,12 @@ from .equation_editor import (
     EquationEditorDialog, edit_equation, manage_equations,
 )
 from .about_dialog import AboutDialog, show_about
+from .menu_bar import MenuBar, MenuItem
+from .smooth_scroll import SmoothScroller, smooth_scroll
+from .guide_dialog import GuideDialog, show_guide
+from .settings_dialog import (
+    SettingsDialog, apply_settings, edit_settings,
+)
 from . import equation_render
 from .workspace_bar import WorkspaceBar
 from .services import AsyncRunner, PreviewManager, reflow_row
@@ -28,6 +34,15 @@ __all__ = [
     "edit_equation",
     "manage_equations",
     "AboutDialog",
+    "MenuBar",
+    "MenuItem",
+    "SmoothScroller",
+    "smooth_scroll",
+    "GuideDialog",
+    "show_guide",
+    "SettingsDialog",
+    "edit_settings",
+    "apply_settings",
     "show_about",
     "equation_render",
     "ask_edge_label",

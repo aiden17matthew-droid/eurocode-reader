@@ -24,6 +24,7 @@ from .equation_editor import edit_equation
 from .equation_render import (
     EquationRenderError, blank_ctk_image, render_ctk_image,
 )
+from .smooth_scroll import smooth_scroll
 
 NO_REFERENCE = "(no Eurocode reference)"
 NO_EQUATION = "(no equation)"
@@ -72,6 +73,8 @@ class NodeEditorDialog(ctk.CTkToplevel):
         self._build_layout()
         self._load_from_node()
 
+        self.scroller = smooth_scroll(self._body)
+
         self.protocol("WM_DELETE_WINDOW", self._on_cancel)
         self.bind("<Escape>", lambda _e: self._on_cancel())
 
@@ -96,6 +99,7 @@ class NodeEditorDialog(ctk.CTkToplevel):
         body = ctk.CTkScrollableFrame(self, fg_color="transparent")
         body.grid(row=0, column=0, sticky="nsew", padx=16, pady=(14, 0))
         body.grid_columnconfigure(0, weight=1)
+        self._body = body
 
         row = 0
 

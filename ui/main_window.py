@@ -1,7 +1,8 @@
 """Application shell for EuroCode Compass.
 
-Holds the menu bar, the persistent header (title + liability notice), the
-workspace bar, the tab view, and the status bar. The tabs themselves are self-contained views:
+Holds the menu bar (built from CTk widgets so it follows the theme), the
+persistent header (title + liability notice), the workspace bar, the tab
+view, and the status bar. The tabs themselves are self-contained views:
 
     SearchView      Phase 1 - load a PDF, index it offline, find the clause
     FlowchartView   Phase 2 - build design workflows that point at clauses
@@ -26,6 +27,7 @@ import customtkinter as ctk
 
 from backend.branding import APP_NAME, WINDOW_TITLE
 from backend.equations import EquationLibrary
+from backend.settings import Settings
 from backend.indexer import DISCLAIMER, Indexer, SearchHit
 from backend.workspace import (
     Workspace,
@@ -41,7 +43,10 @@ from backend.workspace import (
 from .about_dialog import show_about
 from .equation_editor import manage_equations
 from .flowchart_view import FlowchartView
+from .guide_dialog import show_guide
+from .menu_bar import MenuBar, MenuItem
 from .search_view import SearchView
+from .settings_dialog import apply_settings, edit_settings
 from .services import AsyncRunner, PreviewManager
 from .workspace_bar import WorkspaceBar
 
@@ -61,8 +66,14 @@ class EurocodeReaderApp(ctk.CTk):
         indexer: Optional[Indexer] = None,
         session_path: Optional[Path] = None,
         resume: bool = True,
+        settings: Optional[Settings] = None,
     ) -> None:
         super().__init__()
+
+        # Appearance first, so the whole window is built at the size and in
+        # the theme the engineer last chose rather than flickering into it.
+        self.settings = settings if settings is not None else Settings.load()
+        apply_settings(self.settings)
 
         self.indexer = indexer or Indexer()
         # One global equation library, shared by every workflow the engineer
@@ -89,7 +100,6 @@ class EurocodeReaderApp(ctk.CTk):
             ),
         )
 
-        self._build_menu_bar()
         self._build_layout()
         self.runner.start()
         self._warm_up_model()
@@ -107,49 +117,43 @@ class EurocodeReaderApp(ctk.CTk):
     # Menu bar
     # ------------------------------------------------------------------
     def _build_menu_bar(self) -> None:
-        """The familiar File / View / Equations / Help bar along the top.
+        """The File / View / Equations / Help bar along the top.
 
-        A real ``tk.Menu`` rather than a drawn imitation, so it behaves the
-        way every other desktop application does - including the keyboard
-        shortcuts, which are bound for real rather than just printed.
+        Built from CustomTkinter widgets rather than a native tk.Menu:
+        Windows draws its own menu bar in its own colours and ignores what
+        the application asks for, so a dark-themed window ended up wearing a
+        white strip. This one follows the appearance mode like everything
+        else, and the keyboard shortcuts below are bound for real.
         """
-        menubar = tk.Menu(self)
-
-        file_menu = self._menu(menubar)
-        file_menu.add_command(label="New Workspace", accelerator="Ctrl+N",
-                              command=self.new_workspace)
-        file_menu.add_command(label="Open Workspace...", accelerator="Ctrl+O",
-                              command=self.load_workspace)
-        file_menu.add_command(label="Save Workspace", accelerator="Ctrl+S",
-                              command=self.save_workspace)
-        file_menu.add_command(label="Save Workspace As...",
-                              accelerator="Ctrl+Shift+S",
-                              command=self.save_workspace_as)
-        file_menu.add_separator()
-        file_menu.add_command(label="Exit", accelerator="Ctrl+Q",
-                              command=self._on_close)
-        menubar.add_cascade(label="File", menu=file_menu)
-
-        view_menu = self._menu(menubar)
-        view_menu.add_command(label="Search Tab", accelerator="Ctrl+1",
-                              command=lambda: self.show_tab(TAB_SEARCH))
-        view_menu.add_command(label="Flowchart Tab", accelerator="Ctrl+2",
-                              command=lambda: self.show_tab(TAB_FLOWCHART))
-        menubar.add_cascade(label="View", menu=view_menu)
-
-        equations_menu = self._menu(menubar)
-        equations_menu.add_command(label="Manage Global Equations...",
-                                   accelerator="Ctrl+E",
-                                   command=self.manage_global_equations)
-        menubar.add_cascade(label="Equations", menu=equations_menu)
-
-        help_menu = self._menu(menubar)
-        help_menu.add_command(label=f"About {APP_NAME}",
-                              command=self.show_about)
-        menubar.add_cascade(label="Help", menu=help_menu)
-
-        self.configure(menu=menubar)
-        self.menubar = menubar
+        self.menu_bar = MenuBar(self, menus=(
+            ("File", (
+                MenuItem("New Workspace", self.new_workspace, "Ctrl+N"),
+                MenuItem("Open Workspace...", self.load_workspace, "Ctrl+O"),
+                MenuItem("Save Workspace", self.save_workspace, "Ctrl+S"),
+                MenuItem("Save Workspace As...", self.save_workspace_as,
+                         "Ctrl+Shift+S"),
+                MenuItem.divider(),
+                MenuItem("Exit", self._on_close, "Ctrl+Q"),
+            )),
+            ("View", (
+                MenuItem("Search Tab", lambda: self.show_tab(TAB_SEARCH),
+                         "Ctrl+1"),
+                MenuItem("Flowchart Tab",
+                         lambda: self.show_tab(TAB_FLOWCHART), "Ctrl+2"),
+                MenuItem.divider(),
+                MenuItem("Settings...", self.open_settings, "Ctrl+,"),
+            )),
+            ("Equations", (
+                MenuItem("Manage Global Equations...",
+                         self.manage_global_equations, "Ctrl+E"),
+            )),
+            ("Help", (
+                MenuItem(f"How to Use {APP_NAME}", self.show_guide, "F1"),
+                MenuItem.divider(),
+                MenuItem(f"About {APP_NAME}", self.show_about),
+            )),
+        ))
+        self.menu_bar.grid(row=0, column=0, sticky="ew")
 
         for sequence, action in (
             ("<Control-n>", self.new_workspace),
@@ -160,23 +164,10 @@ class EurocodeReaderApp(ctk.CTk):
             ("<Control-Key-1>", lambda: self.show_tab(TAB_SEARCH)),
             ("<Control-Key-2>", lambda: self.show_tab(TAB_FLOWCHART)),
             ("<Control-e>", self.manage_global_equations),
+            ("<Control-comma>", self.open_settings),
+            ("<F1>", self.show_guide),
         ):
             self.bind_all(sequence, lambda _e, run=action: run())
-
-    def _menu(self, parent) -> tk.Menu:
-        """A dropdown coloured for the current appearance mode.
-
-        The bar itself is drawn by the window manager and ignores these, but
-        the dropdowns honour them, so dark mode does not flash white.
-        """
-        dark = ctk.get_appearance_mode() == "Dark"
-        return tk.Menu(
-            parent, tearoff=0,
-            background="#2b2f34" if dark else "#f7f7f7",
-            foreground="#e9ecef" if dark else "#1b2733",
-            activebackground=ACCENT, activeforeground="#ffffff",
-            disabledforeground=MUTED,
-        )
 
     # ------------------------------------------------------------------
     # Menu actions
@@ -197,28 +188,41 @@ class EurocodeReaderApp(ctk.CTk):
             f"equation(s), available to every workflow."
         )
 
+    def open_settings(self) -> None:
+        """Theme and interface size, previewed live."""
+        if edit_settings(self, self.settings, on_change=self._settings_changed):
+            self.set_status(
+                f"Settings saved: {self.settings.appearance.lower()} theme, "
+                f"interface at {self.settings.scale_percent}."
+            )
+
+    def _settings_changed(self, settings: Settings) -> None:
+        # The menu bar is made of CTk widgets, so it repaints itself - this
+        # only has to shut any dropdown left hanging over the old colours.
+        try:
+            self.menu_bar.refresh_theme()
+        except Exception:
+            traceback.print_exc()
+
+    def show_guide(self) -> None:
+        show_guide(self)
+
     def show_about(self) -> None:
         show_about(self)
-
-    def _set_appearance_mode(self, mode_string: str) -> None:
-        """Rebuild the menus when the theme changes - a tk.Menu is not
-        themed by CustomTkinter and would otherwise stay the old colour."""
-        super()._set_appearance_mode(mode_string)
-        try:
-            self._build_menu_bar()
-        except tk.TclError:      # window already torn down
-            pass
 
     # ------------------------------------------------------------------
     # Layout
     # ------------------------------------------------------------------
     def _build_layout(self) -> None:
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(2, weight=1)
+        self.grid_rowconfigure(3, weight=1)
+
+        # --- menu bar (row 0) -------------------------------------------
+        self._build_menu_bar()
 
         # --- header (persistent across every tab) -----------------------
         header = ctk.CTkFrame(self, corner_radius=0, fg_color=("#e8e8e8", "#212121"))
-        header.grid(row=0, column=0, sticky="ew")
+        header.grid(row=1, column=0, sticky="ew")
         header.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
@@ -248,11 +252,11 @@ class EurocodeReaderApp(ctk.CTk):
             on_save=self.save_workspace,
             on_save_as=self.save_workspace_as,
         )
-        self.workspace_bar.grid(row=1, column=0, sticky="ew", padx=20, pady=(10, 0))
+        self.workspace_bar.grid(row=2, column=0, sticky="ew", padx=20, pady=(10, 0))
 
         # --- tabs -------------------------------------------------------
         self.tabs = ctk.CTkTabview(self, corner_radius=8)
-        self.tabs.grid(row=2, column=0, sticky="nsew", padx=14, pady=(10, 6))
+        self.tabs.grid(row=3, column=0, sticky="nsew", padx=14, pady=(10, 6))
         self.tabs.add(TAB_SEARCH)
         self.tabs.add(TAB_FLOWCHART)
 
@@ -286,7 +290,7 @@ class EurocodeReaderApp(ctk.CTk):
             self, text="Ready.", font=ctk.CTkFont(size=11),
             text_color=MUTED, anchor="w",
         )
-        self.status_label.grid(row=3, column=0, sticky="ew", padx=20, pady=(0, 10))
+        self.status_label.grid(row=4, column=0, sticky="ew", padx=20, pady=(0, 10))
 
     def set_status(self, text: str) -> None:
         self.status_label.configure(text=text)

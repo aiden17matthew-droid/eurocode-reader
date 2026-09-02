@@ -32,6 +32,7 @@ from backend.indexer import DISCLAIMER
 from .equation_render import (
     EquationRenderError, blank_ctk_image, render_ctk_image,
 )
+from .smooth_scroll import smooth_scroll
 
 MUTED = "#8a8a8a"
 ACCENT = "#3b8ed0"
@@ -136,6 +137,8 @@ class EquationEditorDialog(ctk.CTkToplevel):
             self.source_entry.insert(0, initial.source)
         self._schedule_preview()
 
+        self.scroller = smooth_scroll(self._body)
+
         self.protocol("WM_DELETE_WINDOW", self._on_cancel)
         self.bind("<Escape>", lambda _e: self._on_cancel())
 
@@ -160,6 +163,7 @@ class EquationEditorDialog(ctk.CTkToplevel):
         body = ctk.CTkScrollableFrame(self, fg_color="transparent")
         body.grid(row=0, column=0, sticky="nsew", padx=16, pady=(14, 0))
         body.grid_columnconfigure(0, weight=1)
+        self._body = body
         row = 0
 
         # --- the expression ---------------------------------------------

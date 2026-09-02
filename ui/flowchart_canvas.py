@@ -450,11 +450,21 @@ class FlowchartCanvas(ctk.CTkFrame):
         return (family, max(MIN_FONT_PX, int(round(size * self.zoom)))) + tuple(spec[2:])
 
     def redraw(self) -> None:
+        """Clear the sheet and draw it again.
+
+        Nothing in here may force Tk to paint: the canvas has just been
+        emptied, so a repaint at this point shows a blank sheet and the
+        engineer sees a flash on every frame of a drag. That is why
+        _update_scrollregion no longer calls update_idletasks, and why it is
+        skipped entirely while a drag is in progress - resizing the sheet
+        mid-drag also shifts the view under the pointer.
+        """
         c = self.canvas
         c.delete("all")
         self._ref_hotspots.clear()
 
-        self._update_scrollregion()
+        if self._drag_id is None and not self._panning:
+            self._update_scrollregion()
         self._draw_grid()
 
         for edge in self.chart.edges:
@@ -491,7 +501,7 @@ class FlowchartCanvas(ctk.CTkFrame):
             self.canvas.create_line(x1, y, x2, y, fill=colour)
 
     def _draw_empty_hint(self) -> None:
-        self.canvas.update_idletasks()
+        # Called from redraw(), so it must not force a paint either.
         x = self.canvas.canvasx(self.canvas.winfo_width() / 2)
         y = self.canvas.canvasy(self.canvas.winfo_height() / 2)
         self.canvas.create_text(
@@ -735,7 +745,9 @@ class FlowchartCanvas(ctk.CTkFrame):
         return node.x + dx * scale, node.y + dy * scale
 
     def _update_scrollregion(self) -> None:
-        self.canvas.update_idletasks()
+        # No update_idletasks here - see redraw(). winfo_width is accurate
+        # once the window has been laid out, and <Configure> brings us back
+        # if it changes.
         view_w = max(self.canvas.winfo_width(), 400)
         view_h = max(self.canvas.winfo_height(), 300)
 
@@ -913,13 +925,19 @@ class FlowchartCanvas(ctk.CTkFrame):
         self.redraw()
 
     def _on_release(self, _event) -> None:
-        if self._drag_id is not None and self._drag_moved:
+        was_dragging = self._drag_id is not None and self._drag_moved
+        if was_dragging:
             self.chart.touch()
             self.on_change()
-            self._update_scrollregion()
+
         self._drag_id = None
         self._drag_moved = False
         self._panning = False
+
+        # Deferred from redraw(), which skips this while a drag is running:
+        # growing the sheet mid-drag shifts the view under the pointer.
+        if was_dragging:
+            self._update_scrollregion()
         self.canvas.configure(cursor="tcross" if self.connect_mode else "")
 
     def _on_double_click(self, event) -> None:

@@ -27,6 +27,7 @@ from backend.indexer import (
 
 from .result_card import ResultCard
 from .services import AsyncRunner, PreviewManager, reflow_row
+from .smooth_scroll import smooth_scroll
 
 ALL_DOCUMENTS = "All Loaded Documents"
 PROGRESS_INTERVAL = 0.05          # seconds between UI progress updates
@@ -184,6 +185,10 @@ class SearchView(ctk.CTkFrame):
             justify="center", wraplength=520,
         )
         self.placeholder.grid(row=0, column=0, pady=40)
+
+        # Browser-speed wheel scrolling. The stock CustomTkinter handler
+        # moves 20 pixels a notch on Windows, which feels like dragging.
+        self.scroller = smooth_scroll(self.results_frame)
 
     # ------------------------------------------------------------------
     # Busy state / errors
@@ -502,6 +507,10 @@ class SearchView(ctk.CTkFrame):
             if width > 1:
                 card.set_wraplength(width)
             self.cards.append(card)
+
+        # Tk delivers a wheel event to the widget under the pointer and does
+        # not pass it to parents, so the new cards need the binding too.
+        self.scroller.refresh()
 
         if show_weak and weak:
             suffix = (f" - {len(weak)} of them weak and shown at your request")

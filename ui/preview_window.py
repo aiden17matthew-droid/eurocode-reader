@@ -161,10 +161,22 @@ class PagePreviewWindow(ctk.CTkToplevel):
             yscrollcommand=v_scroll.set, xscrollcommand=h_scroll.set,
         )
 
-        # Mouse wheel scrolling (Windows / macOS / Linux button events).
-        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
-        self.canvas.bind_all("<Button-4>", lambda _e: self.canvas.yview_scroll(-3, "units"))
-        self.canvas.bind_all("<Button-5>", lambda _e: self.canvas.yview_scroll(3, "units"))
+        # Mouse wheel scrolling, bound to THIS window only.
+        #
+        # bind_all would install these application-wide: they would hijack the
+        # wheel everywhere - so scrolling the search results would scroll this
+        # PDF instead - and, because CustomTkinter's scrollable frame installs
+        # its own global handler, binding without add=True silently replaced
+        # it and unbind_all on close destroyed it for good.
+        #
+        # Binding the canvas and this toplevel keeps the wheel working
+        # anywhere inside the preview and nowhere outside it.
+        for widget in (self.canvas, self):
+            widget.bind("<MouseWheel>", self._on_mousewheel)
+            widget.bind("<Button-4>",
+                        lambda _e: self.canvas.yview_scroll(-3, "units"))
+            widget.bind("<Button-5>",
+                        lambda _e: self.canvas.yview_scroll(3, "units"))
 
         ctk.CTkLabel(
             self, text=DISCLAIMER,
@@ -241,6 +253,7 @@ class PagePreviewWindow(ctk.CTkToplevel):
     # --- events ------------------------------------------------------------
     def _on_mousewheel(self, event) -> None:
         self.canvas.yview_scroll(int(-event.delta / 60), "units")
+        return "break"      # this window has handled it
 
     def _open_externally(self) -> None:
         try:
@@ -249,9 +262,9 @@ class PagePreviewWindow(ctk.CTkToplevel):
             self._show_error(str(exc))
 
     def _on_close(self) -> None:
-        self.canvas.unbind_all("<MouseWheel>")
-        self.canvas.unbind_all("<Button-4>")
-        self.canvas.unbind_all("<Button-5>")
+        # Nothing to unbind: the wheel handlers above are local to this
+        # window and go with it. Calling unbind_all here used to tear out
+        # every other widget's wheel binding as well.
         if self._doc is not None:
             self._doc.close()
             self._doc = None

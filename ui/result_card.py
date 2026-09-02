@@ -44,6 +44,12 @@ class ResultCard(ctk.CTkFrame):
         self.on_open = on_open
         self.on_add = on_add
         self.weak = weak
+        # A pointer crossing the card fires Enter on every child widget it
+        # passes over. Re-applying the highlight each time repaints the whole
+        # frame - about ten milliseconds a go - which is what made hovering
+        # the results feel like dragging them. Track the state and only
+        # repaint when it actually changes.
+        self._hovered = False
         self._default_color = ("#f0f0f0", "#2b2b2b")
         self._hover_color = ("#e4ecf5", "#35404a")
 
@@ -138,13 +144,20 @@ class ResultCard(ctk.CTkFrame):
         usable = min(width - TEXT_PADDING, MAX_TEXT_WIDTH)
         self.snippet_label.configure(wraplength=max(MIN_TEXT_WIDTH, usable))
 
-    def _contains(self, widget) -> bool:
-        """True if `widget` is this card or one of its descendants."""
-        while widget is not None:
-            if widget is self:
-                return True
-            widget = getattr(widget, "master", None)
-        return False
+    def _covers(self, x_root: int, y_root: int) -> bool:
+        """True if a screen point falls inside this card.
+
+        Plain arithmetic on the card's own geometry. The obvious alternative,
+        winfo_containing(), asks the window manager which widget is under the
+        pointer - a round trip that is far too slow to run on every Leave
+        event, and scrolling a list of cards generates a great many of them.
+        """
+        try:
+            left, top = self.winfo_rootx(), self.winfo_rooty()
+            return (left <= x_root < left + self.winfo_width()
+                    and top <= y_root < top + self.winfo_height())
+        except Exception:
+            return False
 
     def _on_click(self, _event=None) -> None:
         self.on_open(self.hit)
@@ -155,6 +168,9 @@ class ResultCard(ctk.CTkFrame):
             self.on_add(self.hit)
 
     def _on_enter(self, _event=None) -> None:
+        if self._hovered:
+            return
+        self._hovered = True
         self.configure(fg_color=self._hover_color, cursor="hand2")
         self.hint_label.configure(text=HINT_TEXT)
 
@@ -162,13 +178,11 @@ class ResultCard(ctk.CTkFrame):
         # Moving between a card's own children fires Leave then Enter. Ignore
         # the Leave if the pointer is still somewhere inside this card,
         # otherwise the highlight and hint flicker.
-        if event is not None:
-            try:
-                under = self.winfo_containing(event.x_root, event.y_root)
-            except Exception:
-                under = None
-            if under is not None and self._contains(under):
-                return
+        if event is not None and self._covers(event.x_root, event.y_root):
+            return
+        if not self._hovered:
+            return
 
+        self._hovered = False
         self.configure(fg_color=self._default_color, cursor="")
         self.hint_label.configure(text="")
