@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, Optional
 
 import customtkinter as ctk
 
@@ -19,6 +19,7 @@ MIN_TEXT_WIDTH = 240
 TEXT_PADDING = 60
 
 HINT_TEXT = "Click to open this page"
+ADD_TEXT = "+ Add to Flowchart"
 
 
 class ResultCard(ctk.CTkFrame):
@@ -35,11 +36,13 @@ class ResultCard(ctk.CTkFrame):
         rank: int,
         on_open: Callable[[SearchHit], None],
         weak: bool = False,
+        on_add: Optional[Callable[[SearchHit], None]] = None,
     ) -> None:
         super().__init__(master, corner_radius=8, fg_color=("#f0f0f0", "#2b2b2b"))
 
         self.hit = hit
         self.on_open = on_open
+        self.on_add = on_add
         self.weak = weak
         self._default_color = ("#f0f0f0", "#2b2b2b")
         self._hover_color = ("#e4ecf5", "#35404a")
@@ -89,18 +92,41 @@ class ResultCard(ctk.CTkFrame):
         )
         self.snippet_label.grid(row=3, column=0, sticky="ew", padx=14)
 
+        footer = ctk.CTkFrame(self, fg_color="transparent")
+        footer.grid(row=4, column=0, sticky="ew", padx=14, pady=(4, 10))
+        footer.grid_columnconfigure(0, weight=1)
+
         # The hint only appears on hover. The label stays gridded with its text
         # blanked, so the card keeps its height and rows do not jump.
         self.hint_label = ctk.CTkLabel(
-            self, text="", anchor="w",
+            footer, text="", anchor="w",
             font=ctk.CTkFont(size=10), text_color=MUTED,
         )
-        self.hint_label.grid(row=4, column=0, sticky="w", padx=14, pady=(4, 10))
+        self.hint_label.grid(row=0, column=0, sticky="w")
+
+        # Sends this result to the Flowchart tab. It must NOT open the PDF, so
+        # it is excluded from the card-wide click binding below.
+        self.add_button: Optional[ctk.CTkButton] = None
+        if on_add is not None:
+            self.add_button = ctk.CTkButton(
+                footer, text=ADD_TEXT, width=140, height=26,
+                font=ctk.CTkFont(size=11, weight="bold"),
+                fg_color="transparent", border_width=1, text_color=ACCENT,
+                command=self._on_add_clicked,
+            )
+            self.add_button.grid(row=0, column=1, sticky="e")
 
         self._bind_recursive(self)
 
     def _bind_recursive(self, widget) -> None:
-        """Make the whole card clickable, not just its background."""
+        """Make the whole card clickable, not just its background.
+
+        The Add button is skipped, along with everything inside it: the card
+        binds <Button-1> on every descendant, so without this the button's
+        click would also reach the card and open the PDF preview.
+        """
+        if self.add_button is not None and widget is self.add_button:
+            return
         widget.bind("<Button-1>", self._on_click)
         widget.bind("<Enter>", self._on_enter)
         widget.bind("<Leave>", self._on_leave)
@@ -122,6 +148,11 @@ class ResultCard(ctk.CTkFrame):
 
     def _on_click(self, _event=None) -> None:
         self.on_open(self.hit)
+
+    def _on_add_clicked(self) -> None:
+        """Send this result to the flowchart. Never opens the preview."""
+        if self.on_add is not None:
+            self.on_add(self.hit)
 
     def _on_enter(self, _event=None) -> None:
         self.configure(fg_color=self._hover_color, cursor="hand2")

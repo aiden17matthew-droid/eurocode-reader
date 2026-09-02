@@ -33,6 +33,13 @@ SCROLL_PAD = 900          # empty room around the nodes to drag/pan into
 EDGE_HIT_TOLERANCE = 8    # px from the line that still counts as a click
 ARROW_SHAPE = (14, 17, 5)
 
+# Node positions are stored in world coordinates and multiplied by the zoom
+# factor only when drawing, so zooming never touches the saved workflow.
+MIN_ZOOM = 0.40
+MAX_ZOOM = 2.50
+ZOOM_STEP = 1.15          # multiplicative, so each notch feels the same
+MIN_FONT_PX = 6           # below this a label is unreadable anyway
+
 TITLE_FONT = ("Segoe UI", 11, "bold")
 META_FONT = ("Segoe UI", 8)
 REF_FONT = ("Segoe UI", 9, "underline")
@@ -97,6 +104,14 @@ def node_size(node: FlowNode) -> Tuple[int, int]:
     return NODE_W, NODE_H
 
 
+def _shorten(text: str, limit: int) -> str:
+    """Trim a label to fit on a node without wrapping into a paragraph."""
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit - 1].rstrip() + "..."
+
+
 def _round_rect_points(x1, y1, x2, y2, r):
     """Corner points that render as a rounded rectangle with smooth=True."""
     return [
@@ -116,7 +131,8 @@ class FlowchartCanvas(ctk.CTkFrame):
       left click on a ref      open that Eurocode page
       double click on a node   edit it
       middle / right drag      pan the sheet
-      wheel / shift+wheel      scroll
+      wheel / shift+wheel      scroll vertically / horizontally
+      ctrl + wheel             zoom about the pointer
     In Connect mode a left click picks the source node, the next picks the
     target, and the arrow is drawn between them.
     """
@@ -130,6 +146,7 @@ class FlowchartCanvas(ctk.CTkFrame):
         on_select: Optional[Callable[[Optional[FlowNode]], None]] = None,
         on_change: Optional[Callable[[], None]] = None,
         on_status: Optional[Callable[[str], None]] = None,
+        on_zoom: Optional[Callable[[float], None]] = None,
     ) -> None:
         super().__init__(master, corner_radius=8)
 
@@ -139,9 +156,11 @@ class FlowchartCanvas(ctk.CTkFrame):
         self.on_select = on_select or (lambda _n: None)
         self.on_change = on_change or (lambda: None)
         self.on_status = on_status or (lambda _t: None)
+        self.on_zoom = on_zoom or (lambda _z: None)
 
         self.colors = palette()
         self.connect_mode = False
+        self.zoom = 1.0
 
         self.selected_node: Optional[str] = None
         self.selected_edge: Optional[FlowEdge] = None
@@ -197,8 +216,19 @@ class FlowchartCanvas(ctk.CTkFrame):
         # the preview window's global wheel handler.
         c.bind("<MouseWheel>", self._on_wheel)
         c.bind("<Shift-MouseWheel>", self._on_shift_wheel)
+        c.bind("<Control-MouseWheel>", self._on_ctrl_wheel)
         c.bind("<Button-4>", lambda _e: c.yview_scroll(-3, "units"))
         c.bind("<Button-5>", lambda _e: c.yview_scroll(3, "units"))
+        c.bind("<Control-Button-4>", lambda e: self.zoom_at(ZOOM_STEP, e.x, e.y))
+        c.bind("<Control-Button-5>", lambda e: self.zoom_at(1 / ZOOM_STEP, e.x, e.y))
+
+        # Keyboard zoom. Tk reports the unshifted key, so both '+' and '=' are
+        # bound - otherwise Ctrl+'+' needs the shift key on most layouts.
+        for key in ("<Control-plus>", "<Control-equal>", "<Control-KP_Add>"):
+            c.bind(key, lambda _e: self.zoom_in())
+        for key in ("<Control-minus>", "<Control-KP_Subtract>"):
+            c.bind(key, lambda _e: self.zoom_out())
+        c.bind("<Control-Key-0>", lambda _e: self.reset_zoom())
 
         c.bind("<Delete>", lambda _e: self.delete_selection())
         c.bind("<BackSpace>", lambda _e: self.delete_selection())
@@ -288,9 +318,15 @@ class FlowchartCanvas(ctk.CTkFrame):
 
     def center_on_content(self) -> None:
         """Scroll so the existing nodes are in view."""
-        self._update_scrollregion()
         if not self.chart.nodes:
             return
+        cx = sum(n.x for n in self.chart.nodes) / len(self.chart.nodes)
+        cy = sum(n.y for n in self.chart.nodes) / len(self.chart.nodes)
+        self.center_on_point(cx, cy)
+
+    def center_on_point(self, world_x: float, world_y: float) -> None:
+        """Scroll until a world coordinate sits in the middle of the view."""
+        self._update_scrollregion()
         self.canvas.update_idletasks()
         region = self.canvas.cget("scrollregion").split()
         if len(region) != 4:
@@ -298,16 +334,97 @@ class FlowchartCanvas(ctk.CTkFrame):
         rx1, ry1, rx2, ry2 = (float(v) for v in region)
         width = max(1.0, rx2 - rx1)
         height = max(1.0, ry2 - ry1)
-        cx = sum(n.x for n in self.chart.nodes) / len(self.chart.nodes)
-        cy = sum(n.y for n in self.chart.nodes) / len(self.chart.nodes)
         view_w = self.canvas.winfo_width()
         view_h = self.canvas.winfo_height()
-        self.canvas.xview_moveto(max(0.0, (cx - rx1 - view_w / 2) / width))
-        self.canvas.yview_moveto(max(0.0, (cy - ry1 - view_h / 2) / height))
+        target_x = world_x * self.zoom
+        target_y = world_y * self.zoom
+        self.canvas.xview_moveto(max(0.0, (target_x - rx1 - view_w / 2) / width))
+        self.canvas.yview_moveto(max(0.0, (target_y - ry1 - view_h / 2) / height))
+
+    def bring_into_view(self, node: FlowNode) -> None:
+        """Scroll to a node only if it is not already on screen."""
+        self.canvas.update_idletasks()
+        view_w, view_h = self.canvas.winfo_width(), self.canvas.winfo_height()
+        left, top = self.canvas.canvasx(0), self.canvas.canvasy(0)
+        x, y = node.x * self.zoom, node.y * self.zoom
+        w, h = node_size(node)
+        margin_x, margin_y = w * self.zoom / 2, h * self.zoom / 2
+        if not (left + margin_x <= x <= left + view_w - margin_x
+                and top + margin_y <= y <= top + view_h - margin_y):
+            self.center_on_point(node.x, node.y)
+
+    # ------------------------------------------------------------------
+    # Zoom
+    # ------------------------------------------------------------------
+    def zoom_in(self) -> None:
+        self._zoom_to_centre(ZOOM_STEP)
+
+    def zoom_out(self) -> None:
+        self._zoom_to_centre(1 / ZOOM_STEP)
+
+    def reset_zoom(self) -> None:
+        """Back to 100%, keeping whatever is in the middle of the view."""
+        self.canvas.update_idletasks()
+        cx = self.canvas.canvasx(self.canvas.winfo_width() / 2) / self.zoom
+        cy = self.canvas.canvasy(self.canvas.winfo_height() / 2) / self.zoom
+        if self._apply_zoom(1.0):
+            self.center_on_point(cx, cy)
+
+    def _zoom_to_centre(self, factor: float) -> None:
+        self.canvas.update_idletasks()
+        self.zoom_at(factor, self.canvas.winfo_width() / 2,
+                     self.canvas.winfo_height() / 2)
+
+    def zoom_at(self, factor: float, screen_x: float, screen_y: float) -> None:
+        """Zoom about a point on screen, keeping what is under it in place.
+
+        Without the anchor the sheet appears to slide away from the pointer,
+        which makes it hard to zoom into the node you are actually looking at.
+        """
+        old = self.zoom
+        # The world point currently under the cursor.
+        world_x = self.canvas.canvasx(screen_x) / old
+        world_y = self.canvas.canvasy(screen_y) / old
+
+        if not self._apply_zoom(old * factor):
+            return
+
+        # Scroll so that same world point lands back under the cursor.
+        region = self.canvas.cget("scrollregion").split()
+        if len(region) != 4:
+            return
+        rx1, ry1, rx2, ry2 = (float(v) for v in region)
+        width = max(1.0, rx2 - rx1)
+        height = max(1.0, ry2 - ry1)
+        self.canvas.xview_moveto(
+            (world_x * self.zoom - screen_x - rx1) / width
+        )
+        self.canvas.yview_moveto(
+            (world_y * self.zoom - screen_y - ry1) / height
+        )
+
+    def _apply_zoom(self, value: float) -> bool:
+        """Clamp and set the zoom. Returns False if nothing changed."""
+        new = max(MIN_ZOOM, min(MAX_ZOOM, value))
+        if abs(new - self.zoom) < 1e-6:
+            return False
+        self.zoom = new
+        self.redraw()
+        self.on_zoom(self.zoom)
+        return True
 
     # ------------------------------------------------------------------
     # Drawing
+    #
+    # The model holds world coordinates. Everything below multiplies by
+    # self.zoom on the way to the canvas, and _world() divides on the way
+    # back, so the saved workflow is identical at any zoom level.
     # ------------------------------------------------------------------
+    def _font(self, spec: Tuple) -> Tuple:
+        """A font tuple scaled to the current zoom."""
+        family, size = spec[0], spec[1]
+        return (family, max(MIN_FONT_PX, int(round(size * self.zoom)))) + tuple(spec[2:])
+
     def redraw(self) -> None:
         c = self.canvas
         c.delete("all")
@@ -322,8 +439,13 @@ class FlowchartCanvas(ctk.CTkFrame):
         if self.connect_mode and self._connect_source:
             self._draw_pending_edge()
 
+        # Naming the standard on every node is noise on a single-standard
+        # chart, but essential once a workflow spans EN 1992 and EN 1997.
+        documents = {n.ref.document_title for n in self.chart.nodes if n.ref}
+        show_document = len(documents) > 1
+
         for node in self.chart.nodes:
-            self._draw_node(node)
+            self._draw_node(node, show_document=show_document)
 
         if not self.chart.nodes:
             self._draw_empty_hint()
@@ -334,11 +456,14 @@ class FlowchartCanvas(ctk.CTkFrame):
             return
         x1, y1, x2, y2 = (int(float(v)) for v in region)
         colour = self.colors["grid"]
-        start_x = x1 - (x1 % GRID_STEP)
-        for x in range(start_x, x2, GRID_STEP * 2):
+        # The grid scales with the sheet, but its on-screen spacing is kept
+        # sane so zooming out does not turn it into a solid block.
+        step = max(24, int(GRID_STEP * 2 * self.zoom))
+        start_x = x1 - (x1 % step)
+        for x in range(start_x, x2, step):
             self.canvas.create_line(x, y1, x, y2, fill=colour)
-        start_y = y1 - (y1 % GRID_STEP)
-        for y in range(start_y, y2, GRID_STEP * 2):
+        start_y = y1 - (y1 % step)
+        for y in range(start_y, y2, step):
             self.canvas.create_line(x1, y, x2, y, fill=colour)
 
     def _draw_empty_hint(self) -> None:
@@ -355,11 +480,14 @@ class FlowchartCanvas(ctk.CTkFrame):
                  "anything.",
         )
 
-    def _draw_node(self, node: FlowNode) -> None:
+    def _draw_node(self, node: FlowNode, show_document: bool = False) -> None:
         c = self.canvas
-        w, h = node_size(node)
-        x1, y1 = node.x - w / 2, node.y - h / 2
-        x2, y2 = node.x + w / 2, node.y + h / 2
+        z = self.zoom
+        base_w, base_h = node_size(node)
+        w, h = base_w * z, base_h * z
+        cx, cy = node.x * z, node.y * z
+        x1, y1 = cx - w / 2, cy - h / 2
+        x2, y2 = cx + w / 2, cy + h / 2
 
         accent = self.colors.get(node.kind, self.colors["process"])
         is_selected = node.id == self.selected_node
@@ -374,7 +502,7 @@ class FlowchartCanvas(ctk.CTkFrame):
 
         if node.kind == "decision":
             c.create_polygon(
-                node.x, y1, x2, node.y, node.x, y2, x1, node.y,
+                cx, y1, x2, cy, cx, y2, x1, cy,
                 fill=self.colors["node_fill"], outline=border, width=width,
             )
             text_width = w * 0.52
@@ -385,53 +513,70 @@ class FlowchartCanvas(ctk.CTkFrame):
                 smooth=True, fill=self.colors["node_fill"],
                 outline=border, width=width,
             )
-            text_width = w - 60
+            text_width = w - 60 * z
         else:
             c.create_polygon(
-                _round_rect_points(x1, y1, x2, y2, CORNER_R),
+                _round_rect_points(x1, y1, x2, y2, CORNER_R * z),
                 smooth=True, fill=self.colors["node_fill"],
                 outline=border, width=width,
             )
             # A coloured spine makes the kind readable at a glance without
             # tinting the whole node.
-            c.create_line(x1 + 3, y1 + CORNER_R, x1 + 3, y2 - CORNER_R,
-                          fill=accent, width=4)
-            text_width = w - 34
+            c.create_line(x1 + 3 * z, y1 + CORNER_R * z,
+                          x1 + 3 * z, y2 - CORNER_R * z,
+                          fill=accent, width=max(2, 4 * z))
+            text_width = w - 34 * z
 
         # Kind badge
-        badge_y = y1 + (18 if node.kind == "decision" else 14)
+        badge_y = y1 + (18 if node.kind == "decision" else 14) * z
         c.create_text(
-            node.x, badge_y, text=KIND_LABELS.get(node.kind, "STEP"),
-            fill=accent, font=META_FONT,
+            cx, badge_y, text=KIND_LABELS.get(node.kind, "STEP"),
+            fill=accent, font=self._font(META_FONT),
         )
 
         # Title
         has_ref = node.ref is not None
-        title_y = node.y - (6 if has_ref else 0)
+        lines_below = (1 if has_ref else 0) + (1 if show_document and has_ref else 0)
+        title_y = cy - lines_below * 7 * z
         c.create_text(
-            node.x, title_y, text=node.display_title, width=text_width,
-            fill=self.colors["title"], font=TITLE_FONT, justify="center",
+            cx, title_y, text=node.display_title, width=text_width,
+            fill=self.colors["title"], font=self._font(TITLE_FONT),
+            justify="center",
         )
 
         # Notes marker - the notes themselves live in the editor, so a busy
         # node never turns into a wall of text on the canvas.
         if node.notes:
             c.create_text(
-                x2 - 12, y1 + 14, text="[notes]", anchor="e",
-                fill=self.colors["meta"], font=NOTE_FONT,
+                x2 - 12 * z, y1 + 14 * z, text="[notes]", anchor="e",
+                fill=self.colors["meta"], font=self._font(NOTE_FONT),
             )
 
         # Eurocode pointer - clicking this opens the page.
         if has_ref:
-            ref_y = y2 - (26 if node.kind == "decision" else 18)
+            ref_y = y2 - (26 if node.kind == "decision" else 18) * z
+
+            # Which standard this step points at. Only drawn once a workflow
+            # spans more than one document - on a single-standard chart the
+            # same title on every node is noise.
+            if show_document:
+                c.create_text(
+                    cx, ref_y - 13 * z,
+                    text=_shorten(node.ref.document_title, 34),
+                    fill=self.colors["meta"], font=self._font(NOTE_FONT),
+                    width=text_width, justify="center",
+                )
+
             item = c.create_text(
-                node.x, ref_y, text=node.ref.label, fill=self.colors["ref"],
-                font=REF_FONT, width=text_width, justify="center",
+                cx, ref_y, text=node.ref.label, fill=self.colors["ref"],
+                font=self._font(REF_FONT), width=text_width, justify="center",
             )
             bbox = c.bbox(item)
             if bbox:
+                # Stored in world coordinates so hit-testing stays zoom-free.
                 self._ref_hotspots[node.id] = (
-                    bbox[0] - 4, bbox[1] - 3, bbox[2] + 4, bbox[3] + 3,
+                    (bbox[0] - 4) / z, (bbox[1] - 3) / z,
+                    (bbox[2] + 4) / z, (bbox[3] + 3) / z,
                 )
 
     def _draw_edge(self, edge: FlowEdge) -> None:
@@ -440,22 +585,24 @@ class FlowchartCanvas(ctk.CTkFrame):
         if source is None or target is None:
             return
 
+        z = self.zoom
         sx, sy = self._boundary(source, target.x, target.y)
         tx, ty = self._boundary(target, source.x, source.y)
+        sx, sy, tx, ty = sx * z, sy * z, tx * z, ty * z
 
         selected = self.selected_edge is edge
         self.canvas.create_line(
             sx, sy, tx, ty,
             fill=self.colors["selected"] if selected else self.colors["edge"],
-            width=3 if selected else 2,
-            arrow="last", arrowshape=ARROW_SHAPE, capstyle="round",
+            width=max(1, (3 if selected else 2) * z),
+            arrow="last", arrowshape=self._arrow_shape(), capstyle="round",
         )
 
         if edge.label:
             mx, my = (sx + tx) / 2, (sy + ty) / 2
             item = self.canvas.create_text(
                 mx, my, text=edge.label, fill=self.colors["edge_label"],
-                font=LABEL_FONT,
+                font=self._font(LABEL_FONT),
             )
             bbox = self.canvas.bbox(item)
             if bbox:
@@ -470,12 +617,19 @@ class FlowchartCanvas(ctk.CTkFrame):
         source = self.chart.node_by_id(self._connect_source)
         if source is None:
             return
+        z = self.zoom
         px, py = self._pointer
         sx, sy = self._boundary(source, px, py)
         self.canvas.create_line(
-            sx, sy, px, py, fill=self.colors["source"], width=2,
-            dash=(6, 4), arrow="last", arrowshape=ARROW_SHAPE,
+            sx * z, sy * z, px * z, py * z, fill=self.colors["source"],
+            width=max(1, 2 * z), dash=(6, 4), arrow="last",
+            arrowshape=self._arrow_shape(),
         )
+
+    def _arrow_shape(self):
+        """Arrowheads scale with the sheet, but never shrink into a dot."""
+        z = max(0.7, self.zoom)
+        return tuple(max(4, v * z) for v in ARROW_SHAPE)
 
     def _boundary(self, node: FlowNode, toward_x: float, toward_y: float):
         """Where the line from the node's centre leaves its outline."""
@@ -502,14 +656,18 @@ class FlowchartCanvas(ctk.CTkFrame):
         view_w = max(self.canvas.winfo_width(), 400)
         view_h = max(self.canvas.winfo_height(), 300)
 
+        # The scroll region lives in canvas coordinates, so it is the world
+        # bounding box multiplied by the zoom.
+        z = self.zoom
         if self.chart.nodes:
             xs, ys = [], []
             for node in self.chart.nodes:
                 w, h = node_size(node)
-                xs += [node.x - w / 2, node.x + w / 2]
-                ys += [node.y - h / 2, node.y + h / 2]
-            x1, x2 = min(xs) - SCROLL_PAD, max(xs) + SCROLL_PAD
-            y1, y2 = min(ys) - SCROLL_PAD, max(ys) + SCROLL_PAD
+                xs += [(node.x - w / 2) * z, (node.x + w / 2) * z]
+                ys += [(node.y - h / 2) * z, (node.y + h / 2) * z]
+            pad = SCROLL_PAD * z
+            x1, x2 = min(xs) - pad, max(xs) + pad
+            y1, y2 = min(ys) - pad, max(ys) + pad
         else:
             x1, y1, x2, y2 = 0.0, 0.0, float(view_w), float(view_h)
 
@@ -525,7 +683,9 @@ class FlowchartCanvas(ctk.CTkFrame):
     # Hit testing
     # ------------------------------------------------------------------
     def _world(self, event) -> Tuple[float, float]:
-        return self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
+        """Widget coordinates -> world coordinates, undoing pan and zoom."""
+        return (self.canvas.canvasx(event.x) / self.zoom,
+                self.canvas.canvasy(event.y) / self.zoom)
 
     def _node_at(self, x: float, y: float) -> Optional[FlowNode]:
         # Reverse order: the most recently added node sits on top.
@@ -553,7 +713,9 @@ class FlowchartCanvas(ctk.CTkFrame):
                 continue
             sx, sy = self._boundary(source, target.x, target.y)
             tx, ty = self._boundary(target, source.x, source.y)
-            if _point_to_segment(x, y, sx, sy, tx, ty) <= EDGE_HIT_TOLERANCE:
+            # The tolerance is in screen pixels, so convert it to world units
+            # - an arrow must stay equally easy to click at any zoom.
+            if _point_to_segment(x, y, sx, sy, tx, ty) <= EDGE_HIT_TOLERANCE / self.zoom:
                 return edge
         return None
 
@@ -585,8 +747,8 @@ class FlowchartCanvas(ctk.CTkFrame):
             start_x = anchor.x
             start_y = anchor.y + (node_size(anchor)[1] + h) / 2 + 70
         else:
-            start_x = self.canvas.canvasx(self.canvas.winfo_width() / 2)
-            start_y = self.canvas.canvasy(self.canvas.winfo_height() / 2)
+            start_x = self.canvas.canvasx(self.canvas.winfo_width() / 2) / self.zoom
+            start_y = self.canvas.canvasy(self.canvas.winfo_height() / 2) / self.zoom
 
         for column in range(8):
             for row in range(8):
@@ -760,6 +922,12 @@ class FlowchartCanvas(ctk.CTkFrame):
 
     def _on_shift_wheel(self, event) -> None:
         self.canvas.xview_scroll(int(-event.delta / 60), "units")
+
+    def _on_ctrl_wheel(self, event) -> None:
+        """Ctrl + wheel zooms about the pointer rather than scrolling."""
+        factor = ZOOM_STEP if event.delta > 0 else 1 / ZOOM_STEP
+        self.zoom_at(factor, event.x, event.y)
+        return "break"      # do not also scroll
 
 
 def _point_to_segment(px, py, x1, y1, x2, y2) -> float:

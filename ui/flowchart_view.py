@@ -21,9 +21,10 @@ from backend.flowchart import (
     Flowchart,
     FlowchartError,
     FlowNode,
+    NodeRef,
     resolve_document_path,
 )
-from backend.indexer import Indexer
+from backend.indexer import Indexer, SearchHit
 
 from .flowchart_canvas import FlowchartCanvas
 from .node_editor import edit_node
@@ -96,9 +97,27 @@ class FlowchartView(ctk.CTkFrame):
             ).grid(row=0, column=column, padx=(8, 0))
 
         # --- tool row ---------------------------------------------------
-        tool_row = ctk.CTkFrame(self, fg_color="transparent")
-        tool_row.grid(row=1, column=0, sticky="ew", padx=6, pady=(10, 0))
-        tool_row.grid_columnconfigure(6, weight=1)
+        # Two groups so the right-hand one can drop to its own line on a
+        # narrow window instead of being clipped off the edge.
+        self.tool_row = ctk.CTkFrame(self, fg_color="transparent")
+        self.tool_row.grid(row=1, column=0, sticky="ew", padx=6, pady=(10, 0))
+        self.tool_row.grid_columnconfigure(0, weight=1)
+
+        tool_row = ctk.CTkFrame(self.tool_row, fg_color="transparent")
+        tool_row.grid(row=0, column=0, sticky="w")
+        self.left_tools = tool_row
+
+        self.right_tools = ctk.CTkFrame(self.tool_row, fg_color="transparent")
+        self.right_tools.grid(row=0, column=1, sticky="e")
+        self._tools_wrapped = False
+        # Reflow on the row's own resize, not just the window's: a tab
+        # that was hidden when the window changed size still has to
+        # re-measure the first time it is shown.
+        self.tool_row.bind(
+            "<Configure>",
+            lambda _e: self._reflow(self.tool_row, self.left_tools, self.right_tools,
+                                    "_tools_wrapped"),
+        )
 
         ctk.CTkButton(
             tool_row, text="+ Step", width=90, height=34,
@@ -130,19 +149,47 @@ class FlowchartView(ctk.CTkFrame):
         )
         self.connect_switch.grid(row=0, column=4, padx=(20, 0))
 
+        # --- zoom -------------------------------------------------------
+        zoom_box = ctk.CTkFrame(self.right_tools, fg_color="transparent")
+        zoom_box.grid(row=0, column=0)
+
+        ctk.CTkButton(
+            zoom_box, text="-", width=32, height=34,
+            font=ctk.CTkFont(size=15, weight="bold"),
+            fg_color="transparent", border_width=1, text_color=MUTED,
+            command=self._on_zoom_out,
+        ).grid(row=0, column=0)
+
+        # The percentage doubles as the reset control, the way a browser's
+        # zoom indicator does.
+        self.zoom_label = ctk.CTkButton(
+            zoom_box, text="100%", width=54, height=34,
+            font=ctk.CTkFont(size=12), fg_color="transparent",
+            border_width=0, text_color=MUTED, hover=False,
+            command=self._on_zoom_reset,
+        )
+        self.zoom_label.grid(row=0, column=1, padx=2)
+
+        ctk.CTkButton(
+            zoom_box, text="+", width=32, height=34,
+            font=ctk.CTkFont(size=15, weight="bold"),
+            fg_color="transparent", border_width=1, text_color=MUTED,
+            command=self._on_zoom_in,
+        ).grid(row=0, column=2)
+
         self.edit_button = ctk.CTkButton(
-            tool_row, text="Edit node", width=95, height=34,
+            self.right_tools, text="Edit node", width=95, height=34,
             fg_color="transparent", border_width=1, text_color=MUTED,
             command=self._on_edit_selected,
         )
-        self.edit_button.grid(row=0, column=7, padx=(8, 0))
+        self.edit_button.grid(row=0, column=1, padx=(16, 0))
 
         self.delete_button = ctk.CTkButton(
-            tool_row, text="Delete", width=80, height=34,
+            self.right_tools, text="Delete", width=80, height=34,
             fg_color="transparent", border_width=1, text_color=MUTED,
             command=self._on_delete_selected,
         )
-        self.delete_button.grid(row=0, column=8, padx=(8, 0))
+        self.delete_button.grid(row=0, column=2, padx=(8, 0))
 
         # --- canvas -----------------------------------------------------
         self.canvas = FlowchartCanvas(
@@ -152,6 +199,7 @@ class FlowchartView(ctk.CTkFrame):
             on_select=self._update_selection_controls,
             on_change=self._mark_dirty,
             on_status=self.set_status,
+            on_zoom=self._on_zoom_changed,
         )
         self.canvas.grid(row=2, column=0, sticky="nsew", padx=6, pady=(10, 4))
 
@@ -159,9 +207,11 @@ class FlowchartView(ctk.CTkFrame):
         self.hint_label = ctk.CTkLabel(
             self, anchor="w", justify="left", text_color=MUTED,
             font=ctk.CTkFont(size=11),
-            text="Double-click a node to edit it. Click its page reference to "
-                 "open that page. Right-drag to pan. Delete removes the "
-                 "selection. Organisational only - no values are calculated.",
+            text="Drag a node to move it. Double-click to edit it, or click its "
+                 "page reference to open that page. Right-drag to pan, "
+                 "Ctrl+wheel to zoom, and click the percentage to reset. "
+                 "Delete removes the selection. Organisational only - no "
+                 "values are calculated.",
         )
         self.hint_label.grid(row=3, column=0, sticky="ew", padx=10, pady=(0, 6))
 
@@ -247,11 +297,72 @@ class FlowchartView(ctk.CTkFrame):
         has_selection = node is not None or self.canvas.selected_edge is not None
         self.delete_button.configure(state="normal" if has_selection else "disabled")
 
+    # ------------------------------------------------------------------
+    # Zoom
+    # ------------------------------------------------------------------
+    def _on_zoom_in(self) -> None:
+        self.canvas.zoom_in()
+
+    def _on_zoom_out(self) -> None:
+        self.canvas.zoom_out()
+
+    def _on_zoom_reset(self) -> None:
+        self.canvas.reset_zoom()
+
+    def _on_zoom_changed(self, zoom: float) -> None:
+        self.zoom_label.configure(text=f"{zoom:.0%}")
+        self.set_status(f"Zoom {zoom:.0%}. Click the percentage to reset to 100%.")
+
     def _on_connect_toggled(self) -> None:
         enabled = bool(self.connect_switch.get())
         self.canvas.set_connect_mode(enabled)
         if not enabled:
             self.set_status("Connect mode off.")
+
+    # ------------------------------------------------------------------
+    # Snippet transfer from the Search tab
+    # ------------------------------------------------------------------
+    def add_node_from_hit(self, hit: SearchHit) -> FlowNode:
+        """Turn a search result into a step, with no retyping.
+
+        The snippet is copied verbatim into the notes as reference text. It is
+        the engineer's own PDF quoted back to them - nothing is interpreted,
+        summarised or calculated on the way across.
+        """
+        if self.connect_switch.get():
+            # Landing mid-connection would be confusing.
+            self.connect_switch.deselect()
+            self._on_connect_toggled()
+
+        # A step reads better titled by what it points at than by the page.
+        if hit.clause_ref:
+            title = f"Clause {hit.clause_ref}"
+        elif hit.table_ref:
+            title = hit.table_ref
+        else:
+            title = f"Page {hit.page_number}"
+
+        node = self.canvas.add_node("process", title)
+        node.ref = NodeRef(
+            document_title=hit.document_title,
+            file_path=hit.document_path,
+            page_number=hit.page_number,
+            document_id=hit.document_id,
+            clause_ref=hit.clause_ref,
+            table_ref=hit.table_ref,
+        )
+        node.notes = hit.snippet
+        self.chart.touch()
+        self._mark_dirty()
+
+        self.canvas.redraw()
+        self.canvas.bring_into_view(node)
+        self._update_selection_controls(node)
+        self.set_status(
+            f"Added '{title}' from {hit.document_title}, {hit.location_label}. "
+            f"Double-click it to edit. {DISCLAIMER}"
+        )
+        return node
 
     # ------------------------------------------------------------------
     # Opening a reference
@@ -365,3 +476,23 @@ class FlowchartView(ctk.CTkFrame):
     def on_resize(self) -> None:
         """Hook for the shell's <Configure> handler."""
         self.hint_label.configure(wraplength=max(320, self.winfo_width() - 40))
+        self._reflow(self.tool_row, self.left_tools, self.right_tools,
+                     "_tools_wrapped")
+
+    def _reflow(self, row, left, right, state_attr: str) -> None:
+        """Drop the right-hand group onto its own line when it will not fit.
+
+        The toolbars carry more controls than a 760px window can show side by
+        side, and a silently clipped button is worse than a second row.
+        """
+        available = row.winfo_width()
+        needed = left.winfo_reqwidth() + right.winfo_reqwidth() + 24
+        wrap = available > 1 and needed > available
+        if wrap == getattr(self, state_attr):
+            return
+        setattr(self, state_attr, wrap)
+        if wrap:
+            right.grid_configure(row=1, column=0, sticky="w", pady=(8, 0))
+        else:
+            right.grid_configure(row=0, column=1, sticky="e", pady=0)
+

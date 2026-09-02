@@ -44,6 +44,7 @@ class SearchView(ctk.CTkFrame):
         runner: AsyncRunner,
         preview: PreviewManager,
         set_status: Callable[[str], None],
+        on_add_to_flowchart: Optional[Callable[[SearchHit], None]] = None,
     ) -> None:
         super().__init__(master, fg_color="transparent")
 
@@ -51,6 +52,9 @@ class SearchView(ctk.CTkFrame):
         self.runner = runner
         self.preview = preview
         self.set_status = set_status
+        # Supplied by the shell, which owns both tabs. Without it the cards
+        # simply have no Add button.
+        self.on_add_to_flowchart = on_add_to_flowchart
 
         self.cards: List[ResultCard] = []
         self.doc_labels: Dict[str, Optional[int]] = {ALL_DOCUMENTS: None}
@@ -71,9 +75,27 @@ class SearchView(ctk.CTkFrame):
         self.grid_rowconfigure(3, weight=1)
 
         # --- toolbar ----------------------------------------------------
-        toolbar = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
-        toolbar.grid(row=0, column=0, sticky="ew", padx=6, pady=(6, 0))
-        toolbar.grid_columnconfigure(3, weight=1)
+        # Two groups so the right-hand one can drop to its own line on a
+        # narrow window instead of being clipped off the edge.
+        self.toolbar = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
+        self.toolbar.grid(row=0, column=0, sticky="ew", padx=6, pady=(6, 0))
+        self.toolbar.grid_columnconfigure(0, weight=1)
+
+        toolbar = ctk.CTkFrame(self.toolbar, fg_color="transparent")
+        toolbar.grid(row=0, column=0, sticky="w")
+        self.left_tools = toolbar
+
+        self.right_tools = ctk.CTkFrame(self.toolbar, fg_color="transparent")
+        self.right_tools.grid(row=0, column=1, sticky="e")
+        self._tools_wrapped = False
+        # Reflow on the row's own resize, not just the window's: a tab
+        # that was hidden when the window changed size still has to
+        # re-measure the first time it is shown.
+        self.toolbar.bind(
+            "<Configure>",
+            lambda _e: self._reflow(self.toolbar, self.left_tools, self.right_tools,
+                                    "_tools_wrapped"),
+        )
 
         self.load_button = ctk.CTkButton(
             toolbar, text="Load PDF", width=110, height=34,
@@ -95,20 +117,20 @@ class SearchView(ctk.CTkFrame):
         # engineer may be hunting for wording the model scores badly, so the
         # floor is a default, not a wall.
         self.weak_check = ctk.CTkCheckBox(
-            toolbar,
+            self.right_tools,
             text=f"Include weak matches (under {MIN_RELEVANCE:.0%})",
             font=ctk.CTkFont(size=12), text_color=MUTED,
             checkbox_width=18, checkbox_height=18,
             command=self._on_weak_toggled,
         )
-        self.weak_check.grid(row=0, column=3, sticky="w", padx=(20, 0))
+        self.weak_check.grid(row=0, column=0, sticky="w", padx=(0, 16))
 
         self.remove_button = ctk.CTkButton(
-            toolbar, text="Remove from index", width=150, height=34,
+            self.right_tools, text="Remove from index", width=150, height=34,
             fg_color="transparent", border_width=1, text_color=MUTED,
             command=self._on_remove_document,
         )
-        self.remove_button.grid(row=0, column=4, sticky="e")
+        self.remove_button.grid(row=0, column=1, sticky="e")
 
         # --- progress ---------------------------------------------------
         self.progress_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -399,6 +421,8 @@ class SearchView(ctk.CTkFrame):
             card = ResultCard(
                 self.results_frame, hit=hit, rank=rank, on_open=self.open_hit,
                 weak=hit.score < MIN_RELEVANCE,
+                on_add=self.add_hit_to_flowchart
+                if self.on_add_to_flowchart else None,
             )
             card.grid(row=rank - 1, column=0, sticky="ew", padx=6, pady=6)
             if width > 1:
@@ -438,12 +462,37 @@ class SearchView(ctk.CTkFrame):
             document_id=hit.document_id,
         )
 
+    def add_hit_to_flowchart(self, hit: SearchHit) -> None:
+        """Hand a result to the Flowchart tab - no preview, no retyping."""
+        if self.on_add_to_flowchart is not None:
+            self.on_add_to_flowchart(hit)
+
     # ------------------------------------------------------------------
     # Window events
     # ------------------------------------------------------------------
     def on_resize(self) -> None:
-        """Re-flow snippet text when the window width changes."""
+        """Re-flow snippet text and the toolbar when the width changes."""
         width = self.results_frame.winfo_width()
         if width > 1:
             for card in self.cards:
                 card.set_wraplength(width)
+        self._reflow(self.toolbar, self.left_tools, self.right_tools,
+                     "_tools_wrapped")
+
+    def _reflow(self, row, left, right, state_attr: str) -> None:
+        """Drop the right-hand group onto its own line when it will not fit.
+
+        The toolbars carry more controls than a 760px window can show side by
+        side, and a silently clipped button is worse than a second row.
+        """
+        available = row.winfo_width()
+        needed = left.winfo_reqwidth() + right.winfo_reqwidth() + 24
+        wrap = available > 1 and needed > available
+        if wrap == getattr(self, state_attr):
+            return
+        setattr(self, state_attr, wrap)
+        if wrap:
+            right.grid_configure(row=1, column=0, sticky="w", pady=(8, 0))
+        else:
+            right.grid_configure(row=0, column=1, sticky="e", pady=0)
+

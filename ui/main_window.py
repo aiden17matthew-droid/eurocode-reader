@@ -20,7 +20,7 @@ from typing import Optional
 
 import customtkinter as ctk
 
-from backend.indexer import DISCLAIMER, Indexer
+from backend.indexer import DISCLAIMER, Indexer, SearchHit
 
 from .flowchart_view import FlowchartView
 from .search_view import SearchView
@@ -110,6 +110,7 @@ class EurocodeReaderApp(ctk.CTk):
             self.tabs.tab(TAB_SEARCH),
             indexer=self.indexer, runner=self.runner,
             preview=self.preview, set_status=self.set_status,
+            on_add_to_flowchart=self.add_hit_to_flowchart,
         )
         self.search_view.grid(row=0, column=0, sticky="nsew")
 
@@ -131,6 +132,18 @@ class EurocodeReaderApp(ctk.CTk):
 
     def set_status(self, text: str) -> None:
         self.status_label.configure(text=text)
+
+    # ------------------------------------------------------------------
+    # Cross-tab actions
+    # ------------------------------------------------------------------
+    def add_hit_to_flowchart(self, hit: SearchHit) -> None:
+        """Search result -> flowchart step, switching tabs on the way.
+
+        The shell owns both tabs, so this is where the two are joined rather
+        than either view reaching into the other.
+        """
+        self.tabs.set(TAB_FLOWCHART)
+        self.flowchart_view.add_node_from_hit(hit)
 
     def _default_error(self, exc: Exception) -> None:
         self.set_status(f"Error: {exc}")

@@ -34,3 +34,18 @@ Allow engineers to build visual, custom calculation flowcharts where each step/n
 3. **Interactive Navigation:** Clicking the Eurocode reference on any node immediately opens the built-in PyMuPDF preview directly to that page.
 4. **Save & Export:** Save flowcharts locally as JSON files so engineers can load, share, and reuse standard office workflows (e.g., `pile_design_workflow.json`).
 5. **Strict Constraint:** The flowchart tool remains purely organizational; it does not execute formulas or calculate values automatically.
+
+## Phase 3: Ergonomics & Snippet Transfer
+
+### Purpose
+Make the flowchart canvas easier to navigate and eliminate manual typing by allowing engineers to send search results directly to the flowchart.
+
+### Core Requirements
+1. **Canvas Ergonomics:**
+   - Users must be able to click and drag nodes to reposition them on the canvas.
+   - Add canvas Zoom In / Zoom Out capabilities (via `Ctrl + MouseWheel` and/or UI buttons).
+2. **One-Click Snippet Transfer ("Add to Flowchart"):**
+   - In the Search view, add an "Add to Flowchart" button to every result card.
+   - Clicking this button must NOT open the PDF preview. Instead, it should switch the app to the Flowchart tab and automatically instantiate a new Process Node.
+   - This new node must be pre-populated with: Document Title, Clause Reference, Page Number, and the exact result snippet text inside the "Notes" field.
+3. **Constraint:** The new features must strictly adhere to the liability rules. The transferred notes are purely textual reference data.
