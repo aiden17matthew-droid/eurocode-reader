@@ -49,3 +49,19 @@ Make the flowchart canvas easier to navigate and eliminate manual typing by allo
    - Clicking this button must NOT open the PDF preview. Instead, it should switch the app to the Flowchart tab and automatically instantiate a new Process Node.
    - This new node must be pre-populated with: Document Title, Clause Reference, Page Number, and the exact result snippet text inside the "Notes" field.
 3. **Constraint:** The new features must strictly adhere to the liability rules. The transferred notes are purely textual reference data.
+
+## Phase 4: Workspace Deck & Session Persistence
+
+### Purpose
+Engineers use multiple Eurocodes simultaneously. The app must allow users to save and load complete "Workspaces" so they can safely version-control their design process and quickly resume complex multi-document setups.
+
+### Core Requirements
+1. **Workspace Save & Load:**
+   - Create a "Workspace" concept that bundles together:
+     1. The specific Eurocode PDFs currently loaded in the index.
+     2. The state/file of the currently active flowchart.
+   - Provide UI buttons (e.g., "Save Workspace As..." and "Load Workspace") so users can save explicit project states and revert to them if they make a mistake.
+2. **Session Auto-Resume:**
+   - On launch, the app should automatically reload the last active Workspace so the engineer doesn't have to manually remount PDFs every morning.
+3. **Multi-Document Search Toggle:**
+   - The document dropdown in the Search tab must allow the user to filter by a single loaded Eurocode (e.g., EN 1991) or search across "All Loaded Documents" simultaneously.

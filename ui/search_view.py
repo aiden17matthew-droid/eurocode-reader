@@ -25,9 +25,9 @@ from backend.indexer import (
 )
 
 from .result_card import ResultCard
-from .services import AsyncRunner, PreviewManager
+from .services import AsyncRunner, PreviewManager, reflow_row
 
-ALL_DOCUMENTS = "All documents"
+ALL_DOCUMENTS = "All Loaded Documents"
 PROGRESS_INTERVAL = 0.05          # seconds between UI progress updates
 DEFAULT_TOP_K = 5
 
@@ -45,6 +45,7 @@ class SearchView(ctk.CTkFrame):
         preview: PreviewManager,
         set_status: Callable[[str], None],
         on_add_to_flowchart: Optional[Callable[[SearchHit], None]] = None,
+        on_documents_changed: Optional[Callable[[], None]] = None,
     ) -> None:
         super().__init__(master, fg_color="transparent")
 
@@ -55,6 +56,8 @@ class SearchView(ctk.CTkFrame):
         # Supplied by the shell, which owns both tabs. Without it the cards
         # simply have no Add button.
         self.on_add_to_flowchart = on_add_to_flowchart
+        # Lets the shell know the workspace's document set has moved on.
+        self.on_documents_changed = on_documents_changed or (lambda: None)
 
         self.cards: List[ResultCard] = []
         self.doc_labels: Dict[str, Optional[int]] = {ALL_DOCUMENTS: None}
@@ -93,8 +96,7 @@ class SearchView(ctk.CTkFrame):
         # re-measure the first time it is shown.
         self.toolbar.bind(
             "<Configure>",
-            lambda _e: self._reflow(self.toolbar, self.left_tools, self.right_tools,
-                                    "_tools_wrapped"),
+            lambda _e: self._reflow_tools(),
         )
 
         self.load_button = ctk.CTkButton(
@@ -261,6 +263,7 @@ class SearchView(ctk.CTkFrame):
         )
         self.placeholder.grid()
         self.search_entry.focus_set()
+        self.on_documents_changed()
 
     def _show_progress(self, text: str) -> None:
         self.progress_frame.grid()
@@ -275,6 +278,57 @@ class SearchView(ctk.CTkFrame):
         self.progress_frame.grid_remove()
         self.progress_bar.set(0)
         self.progress_label.configure(text="")
+
+    def index_documents(
+        self,
+        paths: List[Path],
+        on_done: Callable[[List[str]], None],
+    ) -> None:
+        """Index several PDFs in one background pass, showing progress.
+
+        Used when a workspace refers to a Eurocode this machine has not
+        indexed yet. Failures are collected rather than aborting the rest -
+        one unreadable PDF should not cost the engineer the whole workspace.
+        """
+        if not paths:
+            on_done([])
+            return
+
+        self._set_busy(True)
+        self._show_progress(f"Restoring {len(paths)} document(s)...")
+        self._last_progress = 0.0
+        total = len(paths)
+
+        def work() -> List[str]:
+            problems: List[str] = []
+            for position, pdf_path in enumerate(paths, start=1):
+
+                def on_progress(stage: str, done: int, count: int,
+                                _p=position, _name=pdf_path.name) -> None:
+                    now = time.monotonic()
+                    if now - self._last_progress < PROGRESS_INTERVAL and done < count:
+                        return
+                    self._last_progress = now
+                    fraction = ((_p - 1) + (done / count if count else 0)) / total
+                    label = "Reading" if stage == "reading" else "Embedding"
+                    self.runner.post(
+                        self._update_progress, fraction,
+                        f"[{_p}/{total}] {label} {_name}: {done}/{count}",
+                    )
+
+                try:
+                    self.indexer.index_pdf(pdf_path, progress=on_progress)
+                except Exception as exc:
+                    problems.append(f"{pdf_path.name}: {exc}")
+            return problems
+
+        def done(problems: object) -> None:
+            self._set_busy(False)
+            self._hide_progress()
+            self.refresh_document_list()
+            on_done(list(problems) if isinstance(problems, list) else [])
+
+        self.runner.run(work=work, on_done=done, on_error=self.handle_error)
 
     # ------------------------------------------------------------------
     # Document library
@@ -307,6 +361,24 @@ class SearchView(ctk.CTkFrame):
     def _selected_document_id(self) -> Optional[int]:
         return self.doc_labels.get(self.doc_menu.get())
 
+    def selected_document_label(self) -> str:
+        """What the dropdown is currently pointed at, for status messages."""
+        return self.doc_menu.get()
+
+    def selected_document_title(self) -> Optional[str]:
+        """Title of the selected document, or None for all documents.
+
+        Saved into the workspace so reopening it puts the engineer back on the
+        Eurocode they were reading, not on a reset dropdown.
+        """
+        doc_id = self._selected_document_id()
+        if doc_id is None:
+            return None
+        for doc in self.indexer.list_documents():
+            if int(doc["id"]) == doc_id:
+                return str(doc["title"])
+        return None
+
     def _on_remove_document(self) -> None:
         doc_id = self._selected_document_id()
         if doc_id is None:
@@ -329,6 +401,7 @@ class SearchView(ctk.CTkFrame):
         self._forget_results()
         self.placeholder.grid()
         self.set_status(f"Removed '{label}' from the index.")
+        self.on_documents_changed()
 
     # ------------------------------------------------------------------
     # Searching
@@ -476,23 +549,11 @@ class SearchView(ctk.CTkFrame):
         if width > 1:
             for card in self.cards:
                 card.set_wraplength(width)
-        self._reflow(self.toolbar, self.left_tools, self.right_tools,
-                     "_tools_wrapped")
+        self._reflow_tools()
 
-    def _reflow(self, row, left, right, state_attr: str) -> None:
-        """Drop the right-hand group onto its own line when it will not fit.
-
-        The toolbars carry more controls than a 760px window can show side by
-        side, and a silently clipped button is worse than a second row.
-        """
-        available = row.winfo_width()
-        needed = left.winfo_reqwidth() + right.winfo_reqwidth() + 24
-        wrap = available > 1 and needed > available
-        if wrap == getattr(self, state_attr):
-            return
-        setattr(self, state_attr, wrap)
-        if wrap:
-            right.grid_configure(row=1, column=0, sticky="w", pady=(8, 0))
-        else:
-            right.grid_configure(row=0, column=1, sticky="e", pady=0)
+    def _reflow_tools(self) -> None:
+        self._tools_wrapped = reflow_row(
+            self.toolbar, self.left_tools, self.right_tools,
+            self._tools_wrapped,
+        )
 

@@ -28,7 +28,7 @@ from backend.indexer import Indexer, SearchHit
 
 from .flowchart_canvas import FlowchartCanvas
 from .node_editor import edit_node
-from .services import AsyncRunner, PreviewManager
+from .services import AsyncRunner, PreviewManager, reflow_row
 
 MUTED = "#8a8a8a"
 ACCENT = "#3b8ed0"
@@ -46,6 +46,7 @@ class FlowchartView(ctk.CTkFrame):
         runner: AsyncRunner,
         preview: PreviewManager,
         set_status: Callable[[str], None],
+        on_dirty: Optional[Callable[[], None]] = None,
     ) -> None:
         super().__init__(master, fg_color="transparent")
 
@@ -53,6 +54,8 @@ class FlowchartView(ctk.CTkFrame):
         self.runner = runner
         self.preview = preview
         self.set_status = set_status
+        # Tells the shell the open workspace no longer matches what is saved.
+        self.on_dirty = on_dirty or (lambda: None)
 
         self.chart = Flowchart()
         self.file_path: Optional[Path] = None
@@ -115,8 +118,7 @@ class FlowchartView(ctk.CTkFrame):
         # re-measure the first time it is shown.
         self.tool_row.bind(
             "<Configure>",
-            lambda _e: self._reflow(self.tool_row, self.left_tools, self.right_tools,
-                                    "_tools_wrapped"),
+            lambda _e: self._reflow_tools(),
         )
 
         ctk.CTkButton(
@@ -207,9 +209,10 @@ class FlowchartView(ctk.CTkFrame):
         self.hint_label = ctk.CTkLabel(
             self, anchor="w", justify="left", text_color=MUTED,
             font=ctk.CTkFont(size=11),
-            text="Drag a node to move it. Double-click to edit it, or click its "
-                 "page reference to open that page. Right-drag to pan, "
-                 "Ctrl+wheel to zoom, and click the percentage to reset. "
+            text="Drag a node to move it, or drag the background to pan the "
+                 "sheet. Double-click a node to edit it, or its page reference "
+                 "to open that page. Right-click or double-click an arrow to "
+                 "label it. Ctrl+wheel to zoom, click the percentage to reset, "
                  "Delete removes the selection. Organisational only - no "
                  "values are calculated.",
         )
@@ -224,6 +227,7 @@ class FlowchartView(ctk.CTkFrame):
 
     def _mark_dirty(self) -> None:
         self.dirty = True
+        self.on_dirty()
 
     def _on_name_typed(self, _event=None) -> None:
         name = self.name_entry.get().strip() or "Untitled workflow"
@@ -279,10 +283,16 @@ class FlowchartView(ctk.CTkFrame):
 
     def _on_edit_selected(self) -> None:
         node = self.canvas.selected()
-        if node is None:
-            self.set_status("Select a node first, then choose Edit node.")
+        if node is not None:
+            self._edit_node(node)
             return
-        self._edit_node(node)
+        edge = self.canvas.selected_edge
+        if edge is not None:
+            self.canvas.label_edge(edge)
+            return
+        self.set_status(
+            "Select a node or a connection first, then choose Edit."
+        )
 
     def _on_delete_selected(self) -> None:
         if self.canvas.selected() is None and self.canvas.selected_edge is None:
@@ -292,9 +302,19 @@ class FlowchartView(ctk.CTkFrame):
         self._update_selection_controls(None)
 
     def _update_selection_controls(self, node: Optional[FlowNode]) -> None:
-        state = "normal" if node is not None else "disabled"
-        self.edit_button.configure(state=state)
-        has_selection = node is not None or self.canvas.selected_edge is not None
+        """Point the Edit button at whatever is selected.
+
+        With an arrow selected the button would otherwise sit there disabled,
+        hiding the fact that arrows can be labelled at all.
+        """
+        edge = self.canvas.selected_edge
+        if node is not None:
+            self.edit_button.configure(state="normal", text="Edit node")
+        elif edge is not None:
+            self.edit_button.configure(state="normal", text="Label arrow")
+        else:
+            self.edit_button.configure(state="disabled", text="Edit node")
+        has_selection = node is not None or edge is not None
         self.delete_button.configure(state="normal" if has_selection else "disabled")
 
     # ------------------------------------------------------------------
@@ -318,6 +338,30 @@ class FlowchartView(ctk.CTkFrame):
         self.canvas.set_connect_mode(enabled)
         if not enabled:
             self.set_status("Connect mode off.")
+
+    # ------------------------------------------------------------------
+    # Workspace integration
+    # ------------------------------------------------------------------
+    def adopt_chart(
+        self,
+        chart: Optional[Flowchart],
+        file_path: Optional[str] = None,
+    ) -> None:
+        """Put a workspace's flowchart on the canvas.
+
+        The chart comes from inside the workspace file, so it is exactly what
+        was there when the engineer saved that state - not whatever the
+        separate flowchart file happens to contain now.
+        """
+        self.chart = chart if chart is not None else Flowchart()
+        self.file_path = Path(file_path) if file_path else None
+        self.dirty = False
+        self.canvas.set_chart(self.chart)
+        self._update_title()
+        self._update_selection_controls(None)
+
+    def has_unsaved_changes(self) -> bool:
+        return self.dirty
 
     # ------------------------------------------------------------------
     # Snippet transfer from the Search tab
@@ -476,23 +520,11 @@ class FlowchartView(ctk.CTkFrame):
     def on_resize(self) -> None:
         """Hook for the shell's <Configure> handler."""
         self.hint_label.configure(wraplength=max(320, self.winfo_width() - 40))
-        self._reflow(self.tool_row, self.left_tools, self.right_tools,
-                     "_tools_wrapped")
+        self._reflow_tools()
 
-    def _reflow(self, row, left, right, state_attr: str) -> None:
-        """Drop the right-hand group onto its own line when it will not fit.
-
-        The toolbars carry more controls than a 760px window can show side by
-        side, and a silently clipped button is worse than a second row.
-        """
-        available = row.winfo_width()
-        needed = left.winfo_reqwidth() + right.winfo_reqwidth() + 24
-        wrap = available > 1 and needed > available
-        if wrap == getattr(self, state_attr):
-            return
-        setattr(self, state_attr, wrap)
-        if wrap:
-            right.grid_configure(row=1, column=0, sticky="w", pady=(8, 0))
-        else:
-            right.grid_configure(row=0, column=1, sticky="e", pady=0)
+    def _reflow_tools(self) -> None:
+        self._tools_wrapped = reflow_row(
+            self.tool_row, self.left_tools, self.right_tools,
+            self._tools_wrapped,
+        )
 

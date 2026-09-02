@@ -19,7 +19,9 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import customtkinter as ctk
 
-from backend.flowchart import Flowchart, FlowEdge, FlowNode
+from backend.flowchart import MAX_LABEL, Flowchart, FlowEdge, FlowNode
+
+from .edge_label_dialog import ask_edge_label
 
 # --- geometry ---------------------------------------------------------------
 NODE_W = 220
@@ -127,10 +129,13 @@ class FlowchartCanvas(ctk.CTkFrame):
 
     Mouse:
       left drag on a node      move it
+      left drag on empty space pan the sheet
       left click on empty      clear the selection
       left click on a ref      open that Eurocode page
       double click on a node   edit it
-      middle / right drag      pan the sheet
+      double click on an arrow label it
+      right click on an arrow  menu: label, clear the label, delete
+      middle / right drag      pan the sheet (alternative)
       wheel / shift+wheel      scroll vertically / horizontally
       ctrl + wheel             zoom about the pointer
     In Connect mode a left click picks the source node, the next picks the
@@ -168,6 +173,7 @@ class FlowchartCanvas(ctk.CTkFrame):
         self._drag_id: Optional[str] = None
         self._drag_offset = (0.0, 0.0)
         self._drag_moved = False
+        self._panning = False
         self._pointer = (0.0, 0.0)
         self._ref_hotspots: Dict[str, Tuple[float, float, float, float]] = {}
 
@@ -206,11 +212,13 @@ class FlowchartCanvas(ctk.CTkFrame):
         c.bind("<Double-Button-1>", self._on_double_click)
         c.bind("<Motion>", self._on_motion)
 
-        # Pan with either middle or right drag - trackpads rarely have a
-        # middle button, and a right drag is a familiar pan gesture.
-        for button in ("2", "3"):
-            c.bind(f"<Button-{button}>", self._pan_start)
-            c.bind(f"<B{button}-Motion>", self._pan_move)
+        # Middle drag always pans. Right click opens a menu when it lands on
+        # an arrow, and otherwise falls back to panning - left drag is the
+        # main pan gesture now, so right click is free to do something useful.
+        c.bind("<Button-2>", self._pan_start)
+        c.bind("<B2-Motion>", self._pan_move)
+        c.bind("<Button-3>", self._on_right_press)
+        c.bind("<B3-Motion>", self._pan_move)
 
         # Wheel bindings stay local to this widget so they cannot fight with
         # the preview window's global wheel handler.
@@ -474,8 +482,10 @@ class FlowchartCanvas(ctk.CTkFrame):
             x, y, width=460, justify="center", fill=self.colors["hint"],
             font=("Segoe UI", 11),
             text="Add a Step or a Decision to begin.\n\n"
-                 "Drag nodes to arrange them, drag the sheet with the right "
-                 "mouse button to pan, and use Connect to draw arrows.\n\n"
+                 "Drag nodes to arrange them, drag the background to pan the "
+                 "sheet, Ctrl+wheel to zoom, and use Connect to draw arrows. "
+                 "Right-click an arrow to label it."
+                 "\n\n"
                  "This chart records your workflow - it does not calculate "
                  "anything.",
         )
@@ -766,7 +776,7 @@ class FlowchartCanvas(ctk.CTkFrame):
         x, y = self._world(event)
 
         if self.connect_mode:
-            self._handle_connect_click(x, y)
+            self._handle_connect_click(x, y, event)
             return
 
         # The reference is a hyperlink sitting on top of the node, so it must
@@ -802,10 +812,21 @@ class FlowchartCanvas(ctk.CTkFrame):
             target = self.chart.node_by_id(edge.target_id)
             self.on_status(
                 f"Connection selected: {source.display_title} -> "
-                f"{target.display_title}. Press Delete to remove it."
+                f"{target.display_title}. Right-click or double-click it to "
+                f"add a label, or press Delete to remove it."
             )
+            return
+
+        # Empty background: the click has already cleared the selection, and
+        # holding and moving now drags the sheet. This is the gesture people
+        # expect from every other canvas tool - reaching for a middle button
+        # to pan is not something a trackpad user can do at all.
+        self._start_pan(event)
 
     def _on_drag(self, event) -> None:
+        if self._panning:
+            self.canvas.scan_dragto(event.x, event.y, gain=1)
+            return
         if self._drag_id is None:
             return
         node = self.chart.node_by_id(self._drag_id)
@@ -825,8 +846,8 @@ class FlowchartCanvas(ctk.CTkFrame):
             self._update_scrollregion()
         self._drag_id = None
         self._drag_moved = False
-        if not self.connect_mode:
-            self.canvas.configure(cursor="")
+        self._panning = False
+        self.canvas.configure(cursor="tcross" if self.connect_mode else "")
 
     def _on_double_click(self, event) -> None:
         if self.connect_mode:
@@ -838,6 +859,14 @@ class FlowchartCanvas(ctk.CTkFrame):
             # started a drag - cancel it so the node does not jump.
             self._drag_id = None
             self.on_edit(node)
+            return
+
+        edge = self._edge_at(x, y)
+        if edge is not None:
+            # The press handler will have started a pan on the way here.
+            self._panning = False
+            self.canvas.configure(cursor="")
+            self.label_edge(edge)
 
     def _on_motion(self, event) -> None:
         x, y = self._world(event)
@@ -851,10 +880,14 @@ class FlowchartCanvas(ctk.CTkFrame):
         over_ref = self._ref_at(x, y) is not None
         self.canvas.configure(cursor="hand2" if over_ref else "")
 
-    def _handle_connect_click(self, x: float, y: float) -> None:
+    def _handle_connect_click(self, x: float, y: float, event=None) -> None:
         node = self._node_at(x, y)
         if node is None:
             self._cancel_connect()
+            # Still pan: the sheet has to be navigable while wiring up a
+            # chart that is bigger than the window.
+            if event is not None:
+                self._start_pan(event)
             return
 
         if self._connect_source is None:
@@ -890,15 +923,13 @@ class FlowchartCanvas(ctk.CTkFrame):
             )
 
     def _ask_branch_label(self, source: FlowNode, target: FlowNode) -> str:
-        dialog = ctk.CTkInputDialog(
-            title="Branch label",
-            text=f"Label for the branch from '{source.display_title}' to "
-                 f"'{target.display_title}'.\n\n"
-                 f"Typically Yes or No. This is a caption for the reader - "
-                 f"the app never evaluates it.\n\nLeave blank for no label.",
+        """Offered when a branch leaves a decision, where readers need to tell
+        the routes apart. Every other arrow can be labelled later, or not at
+        all - most sequential steps do not need a caption."""
+        answer = ask_edge_label(
+            self, source.display_title, target.display_title, ""
         )
-        value = dialog.get_input()
-        return (value or "").strip()
+        return answer or ""
 
     def _cancel_connect(self) -> None:
         if self._connect_source is not None:
@@ -909,12 +940,110 @@ class FlowchartCanvas(ctk.CTkFrame):
     # ------------------------------------------------------------------
     # Pan and scroll
     # ------------------------------------------------------------------
-    def _pan_start(self, event) -> None:
+    def _on_right_press(self, event) -> None:
+        """Menu on an arrow, pan anywhere else."""
         self.canvas.focus_set()
+        if not self.connect_mode:
+            x, y = self._world(event)
+            edge = self._edge_at(x, y)
+            if edge is not None:
+                self.selected_node = None
+                self.selected_edge = edge
+                self.redraw()
+                self.on_select(None)
+                self._show_edge_menu(event, edge)
+                return "break"
+        self._start_pan(event)
+
+    def _show_edge_menu(self, event, edge: FlowEdge) -> None:
+        """Context menu for one connection.
+
+        A raw tk.Menu does not follow the CustomTkinter theme, so it takes
+        its colours from the same palette as the canvas.
+        """
+        colours = self.colors
+        menu = tk.Menu(
+            self.canvas, tearoff=0,
+            background=colours["node_fill"], foreground=colours["title"],
+            activebackground=colours["selected"], activeforeground="#ffffff",
+            borderwidth=1, relief="solid",
+        )
+        menu.add_command(
+            label="Edit label..." if edge.label else "Add label...",
+            command=lambda: self.label_edge(edge),
+        )
+        if edge.label:
+            menu.add_command(
+                label="Remove label",
+                command=lambda: self.set_edge_label(edge, ""),
+            )
+        menu.add_separator()
+        menu.add_command(
+            label="Delete connection",
+            command=lambda: self._delete_edge(edge),
+        )
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    # ------------------------------------------------------------------
+    # Labelling
+    # ------------------------------------------------------------------
+    def label_edge(self, edge: FlowEdge) -> None:
+        """Ask for this connection's caption and apply the answer."""
+        source = self.chart.node_by_id(edge.source_id)
+        target = self.chart.node_by_id(edge.target_id)
+        if source is None or target is None:
+            return
+
+        answer = ask_edge_label(
+            self, source.display_title, target.display_title, edge.label
+        )
+        if answer is None:              # cancelled - leave the label alone
+            return
+        self.set_edge_label(edge, answer)
+
+    def set_edge_label(self, edge: FlowEdge, label: str) -> None:
+        """Apply a caption. An empty string means the arrow carries none."""
+        cleaned = (label or "").strip()[:MAX_LABEL]
+        if cleaned == edge.label:
+            return
+        edge.label = cleaned
+        self.chart.touch()
+        self.on_change()
+        self.redraw()
+
+        source = self.chart.node_by_id(edge.source_id)
+        target = self.chart.node_by_id(edge.target_id)
+        route = (f"{source.display_title} -> {target.display_title}"
+                 if source and target else "connection")
+        self.on_status(
+            f"Labelled '{route}' as \"{cleaned}\"." if cleaned
+            else f"Removed the label from '{route}'."
+        )
+
+    def _delete_edge(self, edge: FlowEdge) -> None:
+        self.selected_edge = edge
+        self.selected_node = None
+        self.delete_selection()
+
+    def _start_pan(self, event) -> None:
+        """Begin dragging the sheet from wherever the pointer is."""
+        self._drag_id = None
+        self._panning = True
         self.canvas.scan_mark(event.x, event.y)
         self.canvas.configure(cursor="fleur")
 
+    def _pan_start(self, event) -> None:
+        self.canvas.focus_set()
+        self._start_pan(event)
+
     def _pan_move(self, event) -> None:
+        # Without this guard a right-drag that began on a context menu would
+        # scroll from a stale scan mark and make the sheet jump.
+        if not self._panning:
+            return
         self.canvas.scan_dragto(event.x, event.y, gain=1)
 
     def _on_wheel(self, event) -> None:

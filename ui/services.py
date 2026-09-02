@@ -23,6 +23,33 @@ from .preview_window import DISCLAIMER, PagePreviewWindow, open_in_system_viewer
 
 PUMP_INTERVAL_MS = 40             # how often the UI drains worker results
 
+# A toolbar carries more controls than a narrow window can show side by side.
+# Rather than let a button clip silently off the edge, the right-hand group
+# drops onto its own line. Used by the search toolbar, the flowchart toolbar
+# and the workspace bar.
+REFLOW_GUTTER = 24
+
+
+def reflow_row(row, left, right, wrapped: bool) -> bool:
+    """Lay a two-group row out on one line, or two if it will not fit.
+
+    ``row`` must have column 0 stretchy, with ``left`` at (0, 0) and ``right``
+    at (0, 1). Returns the new wrapped state, which the caller stores and
+    passes back next time - the early return on an unchanged state is what
+    stops the re-grid from retriggering <Configure> forever.
+    """
+    available = row.winfo_width()
+    needed = left.winfo_reqwidth() + right.winfo_reqwidth() + REFLOW_GUTTER
+    wrap = available > 1 and needed > available
+    if wrap == wrapped:
+        return wrapped
+    if wrap:
+        right.grid_configure(row=1, column=0, sticky="w", pady=(8, 0))
+    else:
+        right.grid_configure(row=0, column=1, sticky="e", pady=0)
+    return wrap
+
+
 
 class AsyncRunner:
     """Marshals worker-thread results back onto the Tk main thread.

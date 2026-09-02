@@ -7,6 +7,17 @@ from .pdf_loader import PageChunk, chunk_pdf, load_pdf_metadata
 from .embedder import Embedder, DEFAULT_MODEL_NAME
 from .database import VectorStore, DEFAULT_DB_PATH
 from .indexer import Indexer, SearchHit
+from .workspace import (
+    RestorePlan,
+    Workspace,
+    WorkspaceDocument,
+    WorkspaceError,
+    load_session,
+    plan_restore,
+    resolve_document_ids,
+    resolve_selected_id,
+    save_session,
+)
 from .flowchart import (
     Flowchart,
     FlowchartError,
@@ -32,4 +43,13 @@ __all__ = [
     "FlowNode",
     "NodeRef",
     "resolve_document_path",
+    "Workspace",
+    "WorkspaceDocument",
+    "WorkspaceError",
+    "RestorePlan",
+    "plan_restore",
+    "resolve_document_ids",
+    "resolve_selected_id",
+    "save_session",
+    "load_session",
 ]
