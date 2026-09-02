@@ -24,6 +24,7 @@ from backend.flowchart import (
     NodeRef,
     resolve_document_path,
 )
+from backend.equations import EquationLibrary
 from backend.indexer import Indexer, SearchHit
 
 from .flowchart_canvas import FlowchartCanvas
@@ -47,9 +48,14 @@ class FlowchartView(ctk.CTkFrame):
         preview: PreviewManager,
         set_status: Callable[[str], None],
         on_dirty: Optional[Callable[[], None]] = None,
+        equation_library: Optional[EquationLibrary] = None,
     ) -> None:
         super().__init__(master, fg_color="transparent")
 
+        # The equation library is global, not per-workflow, so the shell owns
+        # it and hands the same one to every node editor.
+        self.equation_library = (equation_library if equation_library is not None
+                                 else EquationLibrary.load_or_empty())
         self.indexer = indexer
         self.runner = runner
         self.preview = preview
@@ -261,7 +267,8 @@ class FlowchartView(ctk.CTkFrame):
             self._on_connect_toggled()
 
         node = self.canvas.add_node(kind)
-        if edit_node(self, node, self.indexer.list_documents()):
+        if edit_node(self, node, self.indexer.list_documents(),
+                     library=self.equation_library):
             self._mark_dirty()
             self.set_status(f"Added '{node.display_title}'.")
         else:
@@ -274,7 +281,8 @@ class FlowchartView(ctk.CTkFrame):
         self._update_selection_controls(self.canvas.selected())
 
     def _edit_node(self, node: FlowNode) -> None:
-        if edit_node(self, node, self.indexer.list_documents()):
+        if edit_node(self, node, self.indexer.list_documents(),
+                     library=self.equation_library):
             self.chart.touch()
             self._mark_dirty()
             self.canvas.redraw()

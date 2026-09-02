@@ -65,3 +65,22 @@ Engineers use multiple Eurocodes simultaneously. The app must allow users to sav
    - On launch, the app should automatically reload the last active Workspace so the engineer doesn't have to manually remount PDFs every morning.
 3. **Multi-Document Search Toggle:**
    - The document dropdown in the Search tab must allow the user to filter by a single loaded Eurocode (e.g., EN 1991) or search across "All Loaded Documents" simultaneously.
+
+## Phase 5: Equation Editor & Global Library
+
+### Purpose
+Allow engineers to easily construct, render, and save complex Eurocode structural equations to a global library, which can then be quickly inserted into any flowchart node to save typing time.
+
+### Core Requirements
+1. **Equation Editor Dialog:**
+   - Create a dialog box where users can construct equations.
+   - Include a "Symbol Palette" (buttons for common Greek letters, math operators, subscripts/superscripts) so they don't have to memorize LaTeX codes.
+   - Provide a Live Preview box that visually renders the equation as they type (e.g., using `matplotlib` to render LaTeX to a Tkinter image).
+2. **Global Equation Library:**
+   - Users must be able to name an equation (e.g., "Punching Shear Capacity") and click "Save Equation".
+   - Saved equations must be stored persistently in the workspace (e.g., a global `data/equations.json` file) so they are available across all workflows.
+3. **Flowchart Node Integration:**
+   - In the Node Editor, add a dropdown or button to "Insert Saved Equation". 
+   - When a node has an equation, it should render beautifully on the flowchart canvas.
+4. **Strict Liability Constraint:**
+   - The equations are purely visual references for the engineer. The app MUST NEVER calculate, evaluate, or solve these formulas.

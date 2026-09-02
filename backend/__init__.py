@@ -18,11 +18,17 @@ from .workspace import (
     resolve_selected_id,
     save_session,
 )
+from .equations import (
+    Equation,
+    EquationError,
+    EquationLibrary,
+)
 from .flowchart import (
     Flowchart,
     FlowchartError,
     FlowEdge,
     FlowNode,
+    NodeEquation,
     NodeRef,
     resolve_document_path,
 )
@@ -41,7 +47,11 @@ __all__ = [
     "FlowchartError",
     "FlowEdge",
     "FlowNode",
+    "NodeEquation",
     "NodeRef",
+    "Equation",
+    "EquationError",
+    "EquationLibrary",
     "resolve_document_path",
     "Workspace",
     "WorkspaceDocument",

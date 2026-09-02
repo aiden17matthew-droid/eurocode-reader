@@ -11,11 +11,14 @@ navigation index.
 
 WHAT IT IS NOT
 --------------
-There is deliberately no expression, formula, equation, value or unit field on
-a node, and no field a program could evaluate. A decision node stores the
-engineer's own prose ("Is the pile slender?") and this module never resolves
-it. Edge labels ("Yes", "No") are captions the engineer writes, not conditions
-the app tests. Engineering accountability stays with the human.
+Nothing here is evaluated. A node may carry an equation, but it is stored as
+LaTeX and only ever handed to a typesetter to be drawn - there is no field for
+a variable's value, a unit, a substitution or a result, and no code path that
+computes one. A decision node stores the engineer's own prose ("Is the pile
+slender?") and this module never resolves it. Edge labels ("Yes", "No") are
+captions the engineer writes, not conditions the app tests. An equation on a
+node means "this is the formula that applies here", never "here is the
+answer". Engineering accountability stays with the human.
 """
 
 from __future__ import annotations
@@ -42,6 +45,7 @@ NODE_KINDS = ("start", "process", "decision", "end")
 MAX_TITLE = 200
 MAX_NOTES = 4000
 MAX_LABEL = 60
+MAX_EQUATION = 1200
 
 
 class FlowchartError(ValueError):
@@ -179,17 +183,59 @@ def resolve_document_path(
 # ---------------------------------------------------------------------------
 
 @dataclass
+class NodeEquation:
+    """The formula shown on a node, as LaTeX.
+
+    The node keeps its own copy of the expression rather than a pointer into
+    the equation library, so a workflow shared with a colleague still draws
+    correctly on a machine whose library has never seen it.
+
+    It is a picture of a formula and nothing more. Nothing in this codebase
+    evaluates it, substitutes into it, or derives a result from it.
+    """
+
+    latex: str
+    name: str = ""
+
+    def __post_init__(self) -> None:
+        # A single expression: newlines would only break the typesetter.
+        self.latex = _clean(self.latex, MAX_EQUATION).replace("\n", " ").strip()
+        self.name = _clean(self.name, MAX_TITLE)
+        if not self.latex:
+            raise FlowchartError("An equation needs an expression.")
+
+    @property
+    def display_name(self) -> str:
+        return self.name or "Equation"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"latex": self.latex, "name": self.name}
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "NodeEquation":
+        if not isinstance(data, dict):
+            raise FlowchartError(
+                f"An equation must be an object, got {type(data).__name__}"
+            )
+        if not data.get("latex"):
+            raise FlowchartError("Equation is missing 'latex'")
+        return cls(latex=data["latex"], name=data.get("name", ""))
+
+
+@dataclass
 class FlowNode:
     """One step in the engineer's workflow.
 
-    Carries a title, free-text notes and an optional Eurocode pointer. There is
-    no computable field here by design.
+    Carries a title, free-text notes, an optional Eurocode pointer and an
+    optional equation to display. There is no computable field here by
+    design: the equation is drawn, never solved.
     """
 
     title: str
     kind: str = "process"
     notes: str = ""
     ref: Optional[NodeRef] = None
+    equation: Optional[NodeEquation] = None
     x: float = 0.0                     # world coordinates of the node centre
     y: float = 0.0
     id: str = field(default_factory=_new_id)
@@ -221,6 +267,7 @@ class FlowNode:
             "title": self.title,
             "notes": self.notes,
             "ref": self.ref.to_dict() if self.ref else None,
+            "equation": self.equation.to_dict() if self.equation else None,
             "x": round(self.x, 2),
             "y": round(self.y, 2),
         }
@@ -230,12 +277,15 @@ class FlowNode:
         if not isinstance(data, dict):
             raise FlowchartError(f"Node must be an object, got {type(data).__name__}")
         raw_ref = data.get("ref")
+        raw_equation = data.get("equation")
         return cls(
             id=data.get("id") or _new_id(),
             kind=data.get("kind", "process"),
             title=data.get("title", ""),
             notes=data.get("notes", ""),
             ref=NodeRef.from_dict(raw_ref) if raw_ref else None,
+            equation=(NodeEquation.from_dict(raw_equation)
+                      if raw_equation else None),
             x=data.get("x", 0.0),
             y=data.get("y", 0.0),
         )

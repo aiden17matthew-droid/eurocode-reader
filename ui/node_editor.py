@@ -1,9 +1,10 @@
-"""Edit one flowchart node: its title, the engineer's notes, and the Eurocode
-page or clause it points at.
+"""Edit one flowchart node: its title, the engineer's notes, the equation it
+displays, and the Eurocode page or clause it points at.
 
-There is no field here for a formula, an equation, a value or a unit, and
-nothing typed in this dialog is ever evaluated. Notes are the engineer's own
-instructions to themselves and their colleagues.
+Nothing typed in this dialog is ever evaluated. There is no field for a
+variable's value, a unit, a substitution or a result; the equation is stored
+as LaTeX and only ever handed to a typesetter to be drawn. Notes are the
+engineer's own instructions to themselves and their colleagues.
 """
 
 from __future__ import annotations
@@ -13,10 +14,21 @@ from typing import Dict, List, Optional
 
 import customtkinter as ctk
 
-from backend.flowchart import MAX_NOTES, MAX_TITLE, NodeRef, FlowNode
+from backend.equations import EquationLibrary, NOT_CALCULATED
+from backend.flowchart import (
+    MAX_NOTES, MAX_TITLE, FlowNode, NodeEquation, NodeRef,
+)
 from backend.indexer import DISCLAIMER
 
+from .equation_editor import edit_equation
+from .equation_render import (
+    EquationRenderError, blank_ctk_image, render_ctk_image,
+)
+
 NO_REFERENCE = "(no Eurocode reference)"
+NO_EQUATION = "(no equation)"
+
+EQUATION_PREVIEW_HEIGHT = 40
 
 KIND_CHOICES = {
     "Step / Process": "process",
@@ -27,23 +39,34 @@ KIND_CHOICES = {
 KIND_LOOKUP = {v: k for k, v in KIND_CHOICES.items()}
 
 MUTED = "#8a8a8a"
+ACCENT = "#3b8ed0"
 WARNING = "#e0a800"
 
 
 class NodeEditorDialog(ctk.CTkToplevel):
     """Modal editor for a single node. ``saved`` says whether it was applied."""
 
-    def __init__(self, master, node: FlowNode, documents: List[dict]) -> None:
+    def __init__(
+        self,
+        master,
+        node: FlowNode,
+        documents: List[dict],
+        library: Optional[EquationLibrary] = None,
+    ) -> None:
         super().__init__(master)
 
         self.node = node
         self.saved = False
         self._documents = documents or []
         self._doc_labels: Dict[str, Optional[dict]] = {NO_REFERENCE: None}
+        self.library = library if library is not None else EquationLibrary()
+        self._equation: Optional[NodeEquation] = node.equation
+        self._equation_photo = None          # Tk drops uncited images
+        self._blank = blank_ctk_image()
 
         self.title(f"Edit node - {node.display_title}")
-        self.geometry("560x680")
-        self.minsize(480, 600)
+        self.geometry("580x820")
+        self.minsize(500, 640)
         self.resizable(True, True)
 
         self._build_layout()
@@ -110,6 +133,43 @@ class NodeEditorDialog(ctk.CTkToplevel):
         row += 1
         self.notes_box = ctk.CTkTextbox(body, height=150, font=ctk.CTkFont(size=12))
         self.notes_box.grid(row=row, column=0, sticky="ew", pady=(0, 14))
+        row += 1
+
+        # --- equation ----------------------------------------------------
+        equation_frame = ctk.CTkFrame(body)
+        equation_frame.grid(row=row, column=0, sticky="ew", pady=(0, 12))
+        equation_frame.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            equation_frame, text="Equation", anchor="w",
+            font=ctk.CTkFont(size=12, weight="bold"),
+        ).grid(row=0, column=0, columnspan=2, sticky="ew", padx=12, pady=(12, 2))
+
+        ctk.CTkLabel(
+            equation_frame, anchor="w", justify="left", text_color=MUTED,
+            font=ctk.CTkFont(size=11), wraplength=430,
+            text="Shown on the node for whoever reads the chart. "
+                 + NOT_CALCULATED,
+        ).grid(row=1, column=0, columnspan=2, sticky="ew", padx=12, pady=(0, 8))
+
+        self.equation_menu = ctk.CTkOptionMenu(
+            equation_frame, values=[NO_EQUATION], height=32,
+            command=self._on_equation_chosen,
+        )
+        self.equation_menu.grid(row=2, column=0, sticky="ew", padx=(12, 8))
+
+        ctk.CTkButton(
+            equation_frame, text="Build / edit...", width=120, height=32,
+            fg_color="transparent", border_width=1, text_color=ACCENT,
+            command=self._on_build_equation,
+        ).grid(row=2, column=1, sticky="e", padx=(0, 12))
+
+        self.equation_preview = ctk.CTkLabel(
+            equation_frame, text="", height=EQUATION_PREVIEW_HEIGHT + 12,
+            fg_color=("#ffffff", "#2b2f34"), corner_radius=6,
+        )
+        self.equation_preview.grid(row=3, column=0, columnspan=2, sticky="ew",
+                                   padx=12, pady=(10, 12))
         row += 1
 
         # --- Eurocode reference ----------------------------------------
@@ -188,6 +248,74 @@ class NodeEditorDialog(ctk.CTkToplevel):
     # ------------------------------------------------------------------
     # Populate / read back
     # ------------------------------------------------------------------
+    def refresh_equation_list(self) -> None:
+        """Rebuild the equation picker from the global library."""
+        names = self.library.names()
+        values = [NO_EQUATION] + names
+
+        # An equation the node already carries may not be in this machine's
+        # library - a shared workflow, or one never saved. Offer it anyway.
+        current = self._equation
+        if current is not None and current.display_name not in names:
+            values.append(current.display_name)
+
+        self.equation_menu.configure(values=values)
+        self.equation_menu.set(
+            current.display_name if current is not None else NO_EQUATION
+        )
+        self._draw_equation_preview()
+
+    def _draw_equation_preview(self) -> None:
+        equation = self._equation
+        if equation is None:
+            self._clear_equation_preview("No equation", MUTED)
+            return
+        colour = "#f0f0f0" if ctk.get_appearance_mode() == "Dark" else "#101418"
+        try:
+            photo = render_ctk_image(equation.latex,
+                                     px_height=EQUATION_PREVIEW_HEIGHT,
+                                     color=colour)
+        except EquationRenderError as exc:
+            self._clear_equation_preview(f"Will not draw: {exc}", WARNING)
+            return
+        self._equation_photo = photo
+        self.equation_preview.configure(image=photo, text="")
+
+    def _clear_equation_preview(self, text: str, colour: str) -> None:
+        """Take the picture off the label before letting it go.
+
+        Releasing it first destroys the underlying Tk image while the label
+        still refers to it, and reconfiguring the label then fails.
+        """
+        self.equation_preview.configure(image=self._blank, text=text,
+                                        text_color=colour)
+        self._equation_photo = None
+
+    def _on_equation_chosen(self, name: str) -> None:
+        if name == NO_EQUATION:
+            self._equation = None
+            self._draw_equation_preview()
+            return
+        saved = self.library.by_name(name)
+        if saved is not None:
+            self._equation = NodeEquation(latex=saved.latex, name=saved.name)
+        self._draw_equation_preview()
+
+    def _on_build_equation(self) -> None:
+        seed = None
+        if self._equation is not None:
+            saved = self.library.by_name(self._equation.name)
+            from backend.equations import Equation
+            seed = saved or Equation(
+                name=self._equation.name or "Equation",
+                latex=self._equation.latex,
+            )
+        chosen = edit_equation(self, self.library, initial=seed,
+                               on_library_changed=self.refresh_equation_list)
+        if chosen is not None:
+            self._equation = NodeEquation(latex=chosen.latex, name=chosen.name)
+        self.refresh_equation_list()
+
     def _load_from_node(self) -> None:
         self.kind_menu.set(KIND_LOOKUP.get(self.node.kind, "Step / Process"))
         self.title_entry.insert(0, self.node.title)
@@ -233,6 +361,7 @@ class NodeEditorDialog(ctk.CTkToplevel):
 
         self.doc_menu.set(selected)
         self._on_document_changed(selected)
+        self.refresh_equation_list()
 
     def _on_document_changed(self, label: str) -> None:
         doc = self._doc_labels.get(label)
@@ -303,6 +432,7 @@ class NodeEditorDialog(ctk.CTkToplevel):
         self.node.title = self.title_entry.get().strip()[:MAX_TITLE]
         self.node.notes = self.notes_box.get("1.0", "end").strip()[:MAX_NOTES]
         self.node.ref = ref
+        self.node.equation = self._equation
 
         self.saved = True
         self._close()
@@ -319,8 +449,14 @@ class NodeEditorDialog(ctk.CTkToplevel):
         self.destroy()
 
 
-def edit_node(master, node: FlowNode, documents: List[dict]) -> bool:
+def edit_node(
+    master,
+    node: FlowNode,
+    documents: List[dict],
+    library: Optional[EquationLibrary] = None,
+) -> bool:
     """Open the editor modally. Returns True if the node was changed."""
-    dialog = NodeEditorDialog(master, node=node, documents=documents)
+    dialog = NodeEditorDialog(master, node=node, documents=documents,
+                              library=library)
     master.wait_window(dialog)
     return dialog.saved

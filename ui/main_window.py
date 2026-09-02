@@ -23,6 +23,7 @@ from typing import List, Optional
 
 import customtkinter as ctk
 
+from backend.equations import EquationLibrary
 from backend.indexer import DISCLAIMER, Indexer, SearchHit
 from backend.workspace import (
     Workspace,
@@ -60,6 +61,9 @@ class EurocodeReaderApp(ctk.CTk):
         super().__init__()
 
         self.indexer = indexer or Indexer()
+        # One global equation library, shared by every workflow the engineer
+        # ever opens - an expression is typed once, not once per project.
+        self.equation_library = EquationLibrary.load_or_empty()
         self.session_path = session_path
         self.workspace_path: Optional[Path] = None
         self.workspace_name = "Untitled workspace"
@@ -160,6 +164,7 @@ class EurocodeReaderApp(ctk.CTk):
             indexer=self.indexer, runner=self.runner,
             preview=self.preview, set_status=self.set_status,
             on_dirty=self.mark_workspace_dirty,
+            equation_library=self.equation_library,
         )
         self.flowchart_view.grid(row=0, column=0, sticky="nsew")
 

@@ -15,13 +15,16 @@ value.
 from __future__ import annotations
 
 import tkinter as tk
+from collections import OrderedDict
 from typing import Callable, Dict, List, Optional, Tuple
 
 import customtkinter as ctk
+from PIL import Image, ImageTk
 
 from backend.flowchart import MAX_LABEL, Flowchart, FlowEdge, FlowNode
 
 from .edge_label_dialog import ask_edge_label
+from .equation_render import EquationRenderError, render_image
 
 # --- geometry ---------------------------------------------------------------
 NODE_W = 220
@@ -29,6 +32,12 @@ NODE_H = 96
 DECISION_W = 250
 DECISION_H = 136
 CORNER_R = 12
+
+# A node showing a formula needs room for it, so it grows rather than
+# squeezing the equation into an unreadable strip.
+EQUATION_EXTRA_H = 56
+EQUATION_PX_HEIGHT = 30       # drawn height at 100% zoom
+EQUATION_CACHE = 64
 
 GRID_STEP = 40
 SCROLL_PAD = 900          # empty room around the nodes to drag/pan into
@@ -101,9 +110,11 @@ def palette() -> Dict[str, str]:
 
 
 def node_size(node: FlowNode) -> Tuple[int, int]:
-    if node.kind == "decision":
-        return DECISION_W, DECISION_H
-    return NODE_W, NODE_H
+    width, height = ((DECISION_W, DECISION_H) if node.kind == "decision"
+                     else (NODE_W, NODE_H))
+    if getattr(node, "equation", None) is not None:
+        height += EQUATION_EXTRA_H
+    return width, height
 
 
 def _shorten(text: str, limit: int) -> str:
@@ -176,6 +187,11 @@ class FlowchartCanvas(ctk.CTkFrame):
         self._panning = False
         self._pointer = (0.0, 0.0)
         self._ref_hotspots: Dict[str, Tuple[float, float, float, float]] = {}
+        # Typesetting an expression costs tens of milliseconds, which is far
+        # too slow to redo on every frame of a drag - so drawn equations are
+        # cached by expression, size and colour, and survive a redraw.
+        self._equation_photos: "OrderedDict[tuple, ImageTk.PhotoImage]" = \
+            OrderedDict()
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -546,13 +562,36 @@ class FlowchartCanvas(ctk.CTkFrame):
 
         # Title
         has_ref = node.ref is not None
+        has_equation = getattr(node, "equation", None) is not None
         lines_below = (1 if has_ref else 0) + (1 if show_document and has_ref else 0)
         title_y = cy - lines_below * 7 * z
+        if has_equation:
+            # The node grew to make room, so the title moves up out of it.
+            title_y -= (EQUATION_EXTRA_H / 2) * z
         c.create_text(
             cx, title_y, text=node.display_title, width=text_width,
             fill=self.colors["title"], font=self._font(TITLE_FONT),
             justify="center",
         )
+
+        # The formula, drawn beneath the title. It is a picture of the
+        # expression - the canvas never reads it for meaning.
+        if has_equation:
+            photo = self._equation_photo(
+                node, text_width, max(10.0, EQUATION_PX_HEIGHT * z)
+            )
+            if photo is not None:
+                c.create_image(
+                    cx, title_y + 16 * z + photo.height() / 2, image=photo,
+                )
+            else:
+                # It will not typeset - name it rather than drawing nothing.
+                c.create_text(
+                    cx, title_y + 26 * z,
+                    text=f"[{node.equation.display_name}]",
+                    fill=self.colors["meta"], font=self._font(NOTE_FONT),
+                    width=text_width, justify="center",
+                )
 
         # Notes marker - the notes themselves live in the editor, so a busy
         # node never turns into a wall of text on the canvas.
@@ -635,6 +674,40 @@ class FlowchartCanvas(ctk.CTkFrame):
             width=max(1, 2 * z), dash=(6, 4), arrow="last",
             arrowshape=self._arrow_shape(),
         )
+
+    def _equation_photo(self, node: FlowNode, max_w: float, max_h: float):
+        """The node's formula, drawn to fit inside the space available."""
+        equation = node.equation
+        if equation is None or max_w < 8 or max_h < 6:
+            return None
+
+        colour = self.colors["title"]
+        key = (equation.latex, int(max_w), int(max_h), colour)
+        cached = self._equation_photos.get(key)
+        if cached is not None:
+            self._equation_photos.move_to_end(key)
+            return cached
+
+        try:
+            image = render_image(equation.latex, px_height=int(max_h),
+                                 color=colour)
+        except EquationRenderError:
+            # A formula that will not typeset must not stop the node drawing.
+            return None
+
+        if image.width > max_w:
+            ratio = max_w / image.width
+            image = image.resize(
+                (max(1, int(image.width * ratio)),
+                 max(1, int(image.height * ratio))),
+                Image.LANCZOS,
+            )
+
+        photo = ImageTk.PhotoImage(image)
+        self._equation_photos[key] = photo
+        while len(self._equation_photos) > EQUATION_CACHE:
+            self._equation_photos.popitem(last=False)
+        return photo
 
     def _arrow_shape(self):
         """Arrowheads scale with the sheet, but never shrink into a dot."""

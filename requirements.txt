@@ -6,3 +6,7 @@ pymupdf>=1.24.0
 sentence-transformers>=3.0.0
 numpy>=1.26.0
 customtkinter>=5.2.0
+
+# Phase 5: typesets equation LaTeX into images with its own
+# mathtext engine - no LaTeX installation and no network needed.
+matplotlib>=3.7.0
