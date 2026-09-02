@@ -16,12 +16,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from .branding import APP_NAME
+from .paths import app_data_dir
 
 SCHEMA_VERSION = 1
 FILE_KIND = "eurocode-reader-settings"
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_SETTINGS_PATH = PROJECT_ROOT / "data" / "settings.json"
+# Under the engineer's own data folder, which in a packaged build is
+# NOT inside the bundle - a one-file .exe unpacks to a temporary
+# directory that is deleted on exit.
+DEFAULT_SETTINGS_PATH = app_data_dir() / "settings.json"
 
 # "System" follows whatever Windows is set to, and keeps following it.
 APPEARANCE_MODES: Tuple[str, ...] = ("System", "Light", "Dark")

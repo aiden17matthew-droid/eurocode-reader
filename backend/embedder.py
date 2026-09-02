@@ -11,6 +11,8 @@ import os
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence
 
+from .paths import bundled_model_home
+
 import numpy as np
 
 DEFAULT_MODEL_NAME = "all-MiniLM-L6-v2"
@@ -25,12 +27,21 @@ _INSTALL_HINT = (
 
 
 def default_cache_dir() -> Path:
-    """Where HuggingFace keeps the downloaded model on this machine."""
+    """Where the model is kept on this machine.
+
+    A packaged build ships the model inside it, so an engineer who has never
+    run Python - and may never put this machine online - still gets a working
+    search. Falling back to the HuggingFace cache keeps a source checkout
+    behaving exactly as before.
+    """
     override = os.environ.get("HF_HOME") or os.environ.get(
         "SENTENCE_TRANSFORMERS_HOME"
     )
     if override:
         return Path(override)
+    bundled = bundled_model_home()
+    if bundled is not None:
+        return bundled
     return Path.home() / ".cache" / "huggingface"
 
 
@@ -64,6 +75,13 @@ class Embedder:
             from sentence_transformers import SentenceTransformer
         except ImportError as exc:  # pragma: no cover - dependency guard
             raise ImportError(_INSTALL_HINT) from exc
+
+        # A packaged build carries its own copy of the model. Point the
+        # HuggingFace libraries at it before they are imported, since they
+        # read this once and cache it.
+        bundled = bundled_model_home()
+        if bundled is not None:
+            os.environ.setdefault("HF_HOME", str(bundled))
 
         if self.offline:
             # Hard-fail rather than silently reaching for the network.

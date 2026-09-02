@@ -15,10 +15,13 @@ from typing import Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from .paths import app_data_dir
 from .pdf_loader import PageChunk
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "eurocode_index.db"
+# Under the engineer's own data folder, which in a packaged build is
+# NOT inside the bundle - a one-file .exe unpacks to a temporary
+# directory that is deleted on exit.
+DEFAULT_DB_PATH = app_data_dir() / "eurocode_index.db"
 
 SCHEMA_VERSION = 1
 

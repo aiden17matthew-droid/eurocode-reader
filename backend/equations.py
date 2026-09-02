@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from .branding import APP_NAME, DISCLAIMER, NOT_CALCULATED
+from .paths import app_data_dir
 
 SCHEMA_VERSION = 1
 
@@ -36,8 +37,10 @@ SCHEMA_VERSION = 1
 # stays put through a rename - every library already on disk uses it.
 FILE_KIND = "eurocode-reader-equation-library"
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_LIBRARY_PATH = PROJECT_ROOT / "data" / "equations.json"
+# Under the engineer's own data folder, which in a packaged build is
+# NOT inside the bundle - a one-file .exe unpacks to a temporary
+# directory that is deleted on exit.
+DEFAULT_LIBRARY_PATH = app_data_dir() / "equations.json"
 
 MAX_NAME = 120
 MAX_LATEX = 1200

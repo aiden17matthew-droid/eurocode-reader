@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .branding import APP_NAME, DISCLAIMER
+from .paths import app_data_dir
 from .flowchart import Flowchart, FlowchartError, _clean
 
 SCHEMA_VERSION = 1
@@ -45,8 +46,10 @@ SCHEMA_VERSION = 1
 FILE_KIND = "eurocode-reader-workspace"
 SESSION_KIND = "eurocode-reader-session"
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_SESSION_PATH = PROJECT_ROOT / "data" / "session.json"
+# Under the engineer's own data folder, which in a packaged build is
+# NOT inside the bundle - a one-file .exe unpacks to a temporary
+# directory that is deleted on exit.
+DEFAULT_SESSION_PATH = app_data_dir() / "session.json"
 
 WORKSPACE_SUFFIX = ".json"
 MAX_NAME = 200
