@@ -7,6 +7,14 @@ from .pdf_loader import PageChunk, chunk_pdf, load_pdf_metadata
 from .embedder import Embedder, DEFAULT_MODEL_NAME
 from .database import VectorStore, DEFAULT_DB_PATH
 from .indexer import Indexer, SearchHit
+from .flowchart import (
+    Flowchart,
+    FlowchartError,
+    FlowEdge,
+    FlowNode,
+    NodeRef,
+    resolve_document_path,
+)
 
 __all__ = [
     "PageChunk",
@@ -18,4 +26,10 @@ __all__ = [
     "DEFAULT_DB_PATH",
     "Indexer",
     "SearchHit",
+    "Flowchart",
+    "FlowchartError",
+    "FlowEdge",
+    "FlowNode",
+    "NodeRef",
+    "resolve_document_path",
 ]

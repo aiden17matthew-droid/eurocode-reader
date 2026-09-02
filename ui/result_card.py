@@ -10,6 +10,7 @@ from backend.indexer import SearchHit
 
 ACCENT = "#3b8ed0"
 MUTED = "#8a8a8a"
+WARNING = "#e0a800"
 
 # On a maximised window a card can be ~1850 px wide. Text that long is hard to
 # scan: the eye loses its place on the return sweep. Cap the measure.
@@ -33,11 +34,13 @@ class ResultCard(ctk.CTkFrame):
         hit: SearchHit,
         rank: int,
         on_open: Callable[[SearchHit], None],
+        weak: bool = False,
     ) -> None:
         super().__init__(master, corner_radius=8, fg_color=("#f0f0f0", "#2b2b2b"))
 
         self.hit = hit
         self.on_open = on_open
+        self.weak = weak
         self._default_color = ("#f0f0f0", "#2b2b2b")
         self._hover_color = ("#e4ecf5", "#35404a")
 
@@ -54,13 +57,15 @@ class ResultCard(ctk.CTkFrame):
 
         ctk.CTkLabel(
             header, text=hit.location_label, anchor="w",
-            font=ctk.CTkFont(size=14, weight="bold"), text_color=ACCENT,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=WARNING if weak else ACCENT,
         ).grid(row=0, column=1, sticky="w")
 
         # Relevance is a retrieval score, not an engineering confidence.
         ctk.CTkLabel(
             header, text=f"match {hit.score:.0%}", anchor="e",
-            font=ctk.CTkFont(size=11), text_color=MUTED,
+            font=ctk.CTkFont(size=11, weight="bold" if weak else "normal"),
+            text_color=WARNING if weak else MUTED,
         ).grid(row=0, column=2, sticky="e")
 
         ctk.CTkLabel(
@@ -68,11 +73,21 @@ class ResultCard(ctk.CTkFrame):
             font=ctk.CTkFont(size=11), text_color=MUTED,
         ).grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 4))
 
+        # A weak match is shown only because the engineer asked to see them.
+        # Label it plainly so it is never mistaken for a confident pointer.
+        if weak:
+            ctk.CTkLabel(
+                self, anchor="w", justify="left",
+                text="Weak match - below the relevance threshold. "
+                     "This page may have nothing to do with your query.",
+                font=ctk.CTkFont(size=11), text_color=WARNING,
+            ).grid(row=2, column=0, sticky="ew", padx=14, pady=(0, 6))
+
         self.snippet_label = ctk.CTkLabel(
             self, text=hit.snippet, anchor="w", justify="left",
             wraplength=MAX_TEXT_WIDTH, font=ctk.CTkFont(size=12),
         )
-        self.snippet_label.grid(row=2, column=0, sticky="ew", padx=14)
+        self.snippet_label.grid(row=3, column=0, sticky="ew", padx=14)
 
         # The hint only appears on hover. The label stays gridded with its text
         # blanked, so the card keeps its height and rows do not jump.
@@ -80,7 +95,7 @@ class ResultCard(ctk.CTkFrame):
             self, text="", anchor="w",
             font=ctk.CTkFont(size=10), text_color=MUTED,
         )
-        self.hint_label.grid(row=3, column=0, sticky="w", padx=14, pady=(4, 10))
+        self.hint_label.grid(row=4, column=0, sticky="w", padx=14, pady=(4, 10))
 
         self._bind_recursive(self)
 

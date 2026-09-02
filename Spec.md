@@ -20,3 +20,17 @@ A local desktop app for Civil/Structural Engineers to rapidly search multi-part 
 ## Out of Scope for Phase 1
 - Flowcharts and custom user notes (Save for Phase 2).
 - Advanced OCR for scanned images (Assume text-based PDFs for now).
+
+## Phase 2: Design Workflow & Flowchart Builder
+
+### Purpose
+Allow engineers to build visual, custom calculation flowcharts where each step/node references a specific Eurocode page or clause. The user designs their own logic (If/Else, step sequences) while retaining human accountability.
+
+### Core Requirements
+1. **Flowchart View / Tab:** Add a secondary tab or view in the UI: "Search" and "Flowchart Builder".
+2. **Node Creation:**
+   - Add nodes (e.g., "Step / Process", "Decision (If/Else)").
+   - Each node allows: a Title, user notes/instructions, and an attached Eurocode Page/Clause tag.
+3. **Interactive Navigation:** Clicking the Eurocode reference on any node immediately opens the built-in PyMuPDF preview directly to that page.
+4. **Save & Export:** Save flowcharts locally as JSON files so engineers can load, share, and reuse standard office workflows (e.g., `pile_design_workflow.json`).
+5. **Strict Constraint:** The flowchart tool remains purely organizational; it does not execute formulas or calculate values automatically.
